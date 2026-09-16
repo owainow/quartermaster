@@ -2,98 +2,75 @@
 
 # Quartermaster 🛡️
 
-**A skill for smarter skill installation and management**
+**Smart, project-scoped capability management for AI coding agents**
 
-Stop bloating system prompts with hundreds of global skills. Quartermaster inspects your workspace and provisions only the tools and plugins your project actually needs.
+Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps your tools in a central armory and plucks only what your current project needs directly into `.agents/`.
 
 <br />
 
 [![Python 3](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success.svg?style=flat-square)](#)
 [![Scope](https://img.shields.io/badge/scope-project--isolated-orange.svg?style=flat-square)](#)
-[![Antigravity](https://img.shields.io/badge/platform-Antigravity-purple.svg?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/platform-Antigravity-purple.svg?style=flat-square)](#)
 
 </div>
 
 ---
 
-## The Problem & The Solution
+## Why Quartermaster?
+
+When you build with AI coding agents, the default approach is to dump all your skills and plugins into one global folder. That works for the first two days. Then reality catches up:
+
+- **Prompt bloat**: Loading dozens of skills injects thousands of tokens into every conversation turn, slowing down execution and driving up costs.
+- **Tool hallucination**: Agents get confused and reach for tools that make no sense for the current repo, like calling Flutter commands in a Python backend.
+- **Lost in local configs**: Global setups live on one machine. When a teammate clones your repo, they have none of your agent workflows.
+
+Quartermaster flips this model. You install all your skills and plugins into one central library. When you open a project, Quartermaster inspects the codebase and plucks only the relevant capabilities into your project's `.agents/` folder.
+
+Everything is isolated, clean, and checked straight into Git alongside your code.
 
 <br />
 
-| The Global Skill Trap ❌ | The Quartermaster Way ✅ |
-| :--- | :--- |
-| **Bloated System Prompts**: Loading dozens of global skills dumps thousands of irrelevant tokens into every turn. | **Project-Scoped Isolation**: Tools live in `<project>/.agents/`. Only the tools needed for your project are loaded. |
-| **Tool Hallucination**: Agents get confused and reach for tools they should not use (e.g. Android CLI on a Python API). | **Accurate Reconnaissance**: Automatically inspects manifests (`package.json`, `pubspec.yaml`, `pyproject.toml`) to match your stack. |
-| **Machine-Bound**: Global configs stay on one machine and never make it into version control. | **Team-Ready**: Checked into git inside `.agents/` so your whole team gets the exact same agent capabilities. |
-| **Stale Setup**: Projects evolve, but agents keep using day-one tools. | **Day-Two Sweeps**: Regular audits check for newly added dependencies and suggest matching skills quietly in the background. |
-
-<br />
-
----
-
-## Table of Contents
-
-- [Core Features](#core-features)
-- [How It Works](#how-it-works)
-- [The 7 Armory Domains](#the-7-armory-domains)
-- [Quick Start & CLI](#quick-start--cli)
-- [Using in Antigravity](#using-in-antigravity)
-- [Settings & Configuration](#settings--configuration)
+```mermaid
+flowchart LR
+    Lib["Central Skills Library\n(~/.gemini/skills-library)"] -->|"Quartermaster plucks matching tools"| Proj[".agents/ in your project repo"]
+    Repo["Project Code & Manifests\n(package.json, pyproject.toml, etc.)"] -->|"Scans & audits"| Proj
+```
 
 ---
 
 ## Core Features
 
-### 📦 Full Plugin and Skill Support
-Antigravity supports both standalone skills and comprehensive plugins. Quartermaster handles both automatically:
-- **Standalone Skills** go into `.agents/skills/<name>/` with their own `SKILL.md` and scripts.
-- **Full Plugins** go into `.agents/plugins/<name>/`, bundling skills, rules (`AGENTS.md`), lifecycle hooks (`hooks.json`), and MCP server configs together.
+### Central Library with Project-Scoped Plucking
+Collect every skill, plugin, and tool you find in your central library (`~/.gemini/skills-library`). Quartermaster inspects your project dependencies and plucks only the tools you actually need into `.agents/`. Your agent gets the exact capabilities it needs, and nothing more.
 
-### 🧭 Brand-New Projects & "I'm Not Sure Yet"
-Starting from an empty directory? Quartermaster doesn't guess. It asks what you're planning to build.
-- If your stack is undecided, choose **"I'm not sure yet"**.
-- Quartermaster equips only universal **General AI-SDLC** skills (spec-driven design, adversarial review, preflight checks). You get rock-solid engineering guardrails from day one without premature framework clutter.
+### In-Flow Git Import
+Found an interesting skill or plugin on GitHub? You don't need to leave your workflow or open a terminal window to install it. Paste the Git URL straight into Quartermaster:
 
-### 🧹 Project Sweep (`--sweep`)
-As your project grows, your agent's toolkit should grow with it:
-- **On-Demand Audit**: Audits your active `.agents/` folder, detects new dependencies in your code, and recommends newly relevant skills from your armory.
-- **Scheduled Background Sweeps**: Run once a day with `--additions-only`. It works quietly in the background, only suggesting new tools without nagging you to remove existing ones.
-
-### 🔗 Library Independence
-Quartermaster doesn't bundle static skills. It references your central skills library (defaulting to `~/.gemini/skills-library`). Point it to your team's repo or personal collection with a single command.
-
----
-
-## How It Works
-
-```mermaid
-flowchart LR
-    A["1. Scan Workspace"] --> B["2. Scope & Match"]
-    B --> C["3. Provision to .agents/"]
-    C --> D["4. Daily Sweep"]
+```bash
+python3 scripts/quartermaster.py --import https://github.com/example/my-awesome-skill
 ```
 
-1. **Scan**: Inspects project files (`pubspec.yaml`, `package.json`, `pyproject.toml`, `firebase.json`, `Dockerfile`, etc.).
-2. **Scope**: Separates universal engineering guardrails from domain-specific tools. For new projects, triggers a quick scoping dialogue.
-3. **Provision**: Copies self-contained skill or plugin directories directly into `<project>/.agents/`.
-4. **Sweep**: Periodically checks for new project requirements and surfaces matching capabilities from your central library.
+Quartermaster clones the repository straight into your central library so it is immediately ready for any project.
 
----
+### Full Plugins and Standalone Skills
+Different tools come in different shapes. Quartermaster supports both:
+- **Standalone Skills**: Single-focus capabilities copied into `.agents/skills/<name>/`.
+- **Full Plugins**: Complete bundles containing skills, rules, lifecycle hooks, and MCP configurations copied into `.agents/plugins/<name>/`.
 
-## The 7 Armory Domains
+### Brand-New Projects & "I'm Not Sure Yet"
+Starting an empty repo from scratch? Quartermaster asks what kind of software you want to build. If you haven't decided on a stack, choose **"I'm not sure yet"**.
 
-Quartermaster categorizes capabilities from your library into 7 functional domains:
+Instead of guessing frameworks prematurely, Quartermaster equips universal Core AI-SDLC guardrails (specifications, adversarial code review, and preflight sanity checks). You get solid engineering fundamentals from day one, and Quartermaster will recommend stack-specific tools once code and manifests appear.
 
-| Domain | Key Packages | What It Provides |
-| :--- | :--- | :--- |
-| **Mobile & Multiplatform** | `flutter`, `android-cli-plugin` | Architecture best practices, responsive layouts, unit testing, and Android emulator tooling. |
-| **Web, Frontend & Design** | `chrome-devtools-plugin`, `impeccable`, `modern-web-guidance` | High-craft UI design polish, DevTools MCP debugging, and modern web architecture. |
-| **Cloud & Backend** | `firebase`, `cloudrun` | Cloud Firestore, Auth, Hosting, Security Rules auditing, and serverless deployment. |
-| **Testing, SDD & ADLC** | `spark-skills`, `agora-adlc`, `conductor` | Spec-driven development (`spec`), adversarial PR review (`pr-review`), and preflight verification. |
-| **Synthetic Data & Simulation** | `synthetikos` | Realistic persona simulation (`customer`, `colleague`), business ledgers, and evaluation datasets. |
-| **Science & Bio-Informatics** | `science` | PubMed/arXiv search, AlphaFold/PDB structure analysis, genomics, and `uv` package management. |
-| **AI Agent Development** | `google-antigravity-sdk` | Multi-agent orchestration, tool creation, and agent evaluation workflows. |
+### Intelligent Sweeps & Pruning Governance
+Codebases change. You adopt new libraries, add database layers, or deprecate old services. Running a sweep audits your current `.agents/` folder against your code:
+
+- **Surfaces new capabilities**: Recommends newly relevant tools from your library when new dependencies are added.
+- **Flags unneeded tools**: Identifies installed tools whose dependencies were removed from your code.
+- **Configurable Pruning**:
+  - `suggest-pruning` (default: `true`): Highlights unneeded skills and plugins so you can decide whether to drop them.
+  - `auto-prune` (default: `false`): Automatically cleans up unneeded skills and plugins during sweeps, keeping your repo tidy with zero friction.
 
 ---
 
@@ -101,34 +78,42 @@ Quartermaster categorizes capabilities from your library into 7 functional domai
 
 Quartermaster runs on pure Python 3 with zero external dependencies.
 
-### 1. Scan a Project
+### 1. Import a Tool into Your Central Library
 ```bash
-# Scan current directory
+python3 scripts/quartermaster.py --import https://github.com/example/cool-agent-skill
+```
+
+### 2. Scan a Workspace
+```bash
+# Scan the current directory
 python3 scripts/quartermaster.py --scan
 
 # Scan a specific project path
 python3 scripts/quartermaster.py --scan /path/to/project
 ```
 
-### 2. Provision Skills or Full Plugins
+### 3. Provision Capabilities into `.agents/`
 ```bash
-# Provision individual skills into .agents/skills/
-python3 scripts/quartermaster.py --provision /path/to/project --skills impeccable,spec,pr-review
+# Provision individual skills
+python3 scripts/quartermaster.py --provision /path/to/project --skills spec,pr-review
 
-# Provision full plugins into .agents/plugins/
-python3 scripts/quartermaster.py --provision /path/to/project --plugins spark-skills,firebase
+# Provision full plugins
+python3 scripts/quartermaster.py --provision /path/to/project --plugins spark-skills
 ```
 
-### 3. Run a Sweep Audit
+### 4. Run a Sweep Audit
 ```bash
-# On-demand sweep (shows additions and potential cleanup)
+# Run standard sweep (recommends additions and suggests pruning)
 python3 scripts/quartermaster.py --sweep /path/to/project
 
-# Background mode (strictly additions, zero friction)
-python3 scripts/quartermaster.py --sweep /path/to/project --additions-only --json
+# Run sweep with auto-pruning enabled (removes unneeded tools automatically)
+python3 scripts/quartermaster.py --sweep /path/to/project --auto-prune
+
+# Run sweep without pruning recommendations (additions only)
+python3 scripts/quartermaster.py --sweep /path/to/project --no-prune
 ```
 
-### 4. Browse the Catalog
+### 5. Browse the Central Library Catalog
 ```bash
 python3 scripts/quartermaster.py --catalog
 ```
@@ -137,27 +122,34 @@ python3 scripts/quartermaster.py --catalog
 
 ## Using in Antigravity
 
-When working inside the Antigravity chat interface, Quartermaster is available directly:
+When working inside the Antigravity agent chat, you can drive Quartermaster directly:
 
-- **`/quartermaster`**: Launches the guided 5-stage project onboarding interview.
-- **`/quartermaster sweep`**: Audits the current repository and suggests newly relevant tools.
-- **Daily Cron**: Schedule a recurring daily background sweep (`0 9 * * *` via `/schedule`) to keep your workspace outfitted as your codebase grows.
+- **`/quartermaster`**: Launches the guided project onboarding flow.
+- **`/quartermaster sweep`**: Audits the current repository and tidies capabilities.
+- **`/quartermaster import <git-url>`**: Clones a skill or plugin repository into your central library without breaking flow.
+- **Daily Sweep**: Schedule a recurring daily background sweep (`0 9 * * *` via `/schedule`) to keep your workspace outfitted as your codebase grows.
 
 ---
 
 ## Settings & Configuration
 
-Settings are saved globally in `~/.gemini/quartermaster/config.json`.
+Settings are stored globally in `~/.gemini/quartermaster/config.json`.
 
 ```bash
-# View active settings
+# View all active settings
 python3 scripts/quartermaster.py --config
 
-# Check current skills library location
+# Check your central skills library path
 python3 scripts/quartermaster.py --config-get skills-library
 
-# Point to a custom skills library
+# Set a custom library location
 python3 scripts/quartermaster.py --config-set skills-library /path/to/my-library
+
+# Enable auto-pruning during sweeps
+python3 scripts/quartermaster.py --config-set auto-prune true
+
+# Suppress pruning suggestions by default
+python3 scripts/quartermaster.py --config-set suggest-pruning false
 ```
 
 ---
@@ -165,4 +157,3 @@ python3 scripts/quartermaster.py --config-set skills-library /path/to/my-library
 <div align="center">
 Built for modern agentic workflows with Antigravity.
 </div>
-

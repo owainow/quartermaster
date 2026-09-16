@@ -1,22 +1,23 @@
 ---
 name: quartermaster
-description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps. Use when onboarding a project, provisioning tools, running /quartermaster, or running /quartermaster sweep.
+description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Use when onboarding a project, provisioning tools, importing skills from git, running /quartermaster, /quartermaster sweep, or /quartermaster import.
 ---
 
 # Quartermaster: Project Onboarding & Skill Provisioning Armory
 
 Quartermaster equips workspaces with project-scoped skills and full plugins tailored to their exact technology stack. Instead of overloading agents with global skills, Quartermaster provisions self-contained capabilities directly into `<workspace>/.agents/skills/` and `<workspace>/.agents/plugins/`, eliminating global token pollution and tool hallucination.
 
-Quartermaster references an external **skills library** (default: `~/.gemini/skills-library`), which can be configured via interactive settings.
+Quartermaster references an external central **skills library** (default: `~/.gemini/skills-library`), which can be configured via interactive settings. All skills and plugins are installed into the central library first, and Quartermaster dynamically plucks only the relevant capabilities into your project.
 
 ---
 
 ## Core Operational Modes
 
-Quartermaster operates across three distinct modes:
+Quartermaster operates across four distinct modes:
 1. **Initial Project Onboarding (`/quartermaster`)**: 5-stage setup for active or brand-new projects.
 2. **Interactive Sweep (`/quartermaster sweep`)**: Workspace audit comparing installed capabilities against evolving tech manifests and the armory.
-3. **Scheduled Daily Sweep**: Background cron job running daily with `--additions-only` mode for frictionless skill onboarding.
+3. **In-Flow Git Import (`/quartermaster import <git-url>`)**: Clones a skill or plugin repository directly into your central library without breaking developer flow.
+4. **Scheduled Daily Sweep**: Recurring background task that audits dependencies, checks for additions, and suggests or auto-prunes unneeded capabilities based on your configuration.
 
 ---
 
@@ -119,33 +120,50 @@ python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_pa
 ### What the Sweep Audits:
 1. **Active Project Inventory**: Lists all plugins in `.agents/plugins/` and skills in `.agents/skills/`.
 2. **Stack Changes**: Re-scans manifests and dependencies.
-3. **Recommended Additions**: Identifies newly relevant skills or plugins from the library not yet provisioned.
-4. **Pruning Candidates**: In interactive mode, highlights installed stack-specific skills whose manifests were removed. Core AI-SDLC skills are never marked for pruning.
+3. **Recommended Additions**: Identifies newly relevant skills or plugins from the central library not yet provisioned.
+4. **Pruning Candidates**: By default, flags installed stack tools whose underlying manifests are no longer present. Core AI-SDLC skills are never marked for pruning.
+   - If `auto-prune` is enabled (`true`), Quartermaster deletes unneeded tools automatically.
+   - If `suggest-pruning` is enabled (`true`, default), Quartermaster lists them for review.
+   - If `suggest-pruning` is disabled (`false`), removal suggestions are suppressed.
 
 ---
 
-## Mode 3: Scheduled Daily Background Sweep (Zero Friction)
+## Mode 3: In-Flow Git Import (`/quartermaster import <git-url>`)
 
-To keep workspaces outfitted with zero interruption:
-- Quartermaster runs the sweep with `--additions-only`:
+When you find a new skill or plugin on GitHub, import it directly into your central library without switching context or breaking flow:
+
+```bash
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --import <git_url>
+```
+
+Quartermaster shallow-clones the repo into your configured `skills-library` directory, verifies whether it is a standalone skill or multi-tool plugin, and immediately indexes it in the armory catalog.
+
+---
+
+## Mode 4: Scheduled Daily Background Sweep
+
+To keep workspaces outfitted as the codebase evolves:
+- Quartermaster runs the sweep on a daily schedule:
   ```bash
-  python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path> --additions-only --json
+  python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path> --json
   ```
-- **Frictionless Policy**:
-  - **Strictly Additions Only**: Automated background sweeps *never* recommend pruning or removing skills.
-  - **Quiet Execution**: If no new skills are found, exits with zero output or notifications.
-  - **Discreet Alert**: If new matching skills are detected, delivers a gentle, non-blocking notification:
-    > *"Quartermaster Sweep: 2 new capabilities match your updated stack (`firebase`, `chrome-devtools-plugin`). Run `/quartermaster sweep` to review or outfit."*
+- **Pruning Governance**:
+  - By default, daily sweeps suggest unneeded skills to remove alongside newly recommended additions.
+  - If `auto-prune` is set to `true`, unneeded tools are automatically removed.
+  - If the user prefers additions only, they can set `suggest-pruning` to `false` or pass `--no-prune`.
+- **Quiet Execution**: If no additions or pruning candidates are found, exits silently.
+- **Discreet Alert**: When changes are detected, delivers a concise notification:
+  > *"Quartermaster Sweep: 1 new tool recommended (`firebase`), 1 unneeded tool flagged for removal (`flutter`). Run `/quartermaster sweep` to review."*
 
 ### Registering the Daily Scheduled Task in AGY
 Use the Antigravity `schedule` tool or `/schedule` to set up a recurring daily cron job:
 - **CronExpression**: `"0 9 * * *"` (daily at 9:00 AM)
 - **IsDaemon**: `true`
-- **Prompt**: `"Run Quartermaster background sweep for <project_path> using python3 ~/quartermaster/scripts/quartermaster.py --sweep <project_path> --additions-only --json and notify only if new skills are recommended."`
+- **Prompt**: `"Run Quartermaster background sweep for <project_path> using python3 ~/quartermaster/scripts/quartermaster.py --sweep <project_path> --json and notify if additions or pruning recommendations are detected."`
 
 ---
 
-## Configuring Settings & Skills Library Location
+## Configuring Settings
 
 Quartermaster settings are persisted globally in `~/.gemini/quartermaster/config.json`.
 
@@ -153,9 +171,15 @@ Quartermaster settings are persisted globally in `~/.gemini/quartermaster/config
 # View current settings
 python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config
 
-# Get skills-library location
+# Get a setting
 python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get skills-library
 
-# Update skills-library location
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set skills-library /path/to/custom-library
+# Update central library location
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set skills-library /path/to/my-library
+
+# Enable auto-pruning during sweeps (default: false)
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set auto-prune true
+
+# Suppress pruning suggestions during sweeps (default: true)
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set suggest-pruning false
 ```

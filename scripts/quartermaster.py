@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
 Quartermaster - Project-Scoped Capability Provisioner & Armory Engine
-Scans project tech stacks, discovers available skills and plugins from an external armory library,
-and provisions scoped, tailored capabilities directly into `<project_path>/.agents/`.
+References an external central skills library, plucks only project-relevant skills and plugins
+into `<project_path>/.agents/`, scopes brand-new projects, and provides sweep audits with
+configurable pruning governance and in-flow git library imports.
 
 Features:
-- External skills-library referencing with interactive settings configuration
+- External central library referencing (default: ~/.gemini/skills-library)
+- Dynamic in-flow git imports (--import <git-url>) directly into central library
 - Dual provisioning: Full plugins (.agents/plugins/) and standalone skills (.agents/skills/)
 - Clean capability tiers: Core AI-SDLC (universal) vs Stack-Specific
 - Interactive brand-new project scoping with "I'm not sure yet" fallback
 - Project sweep (--sweep) for ongoing audits (additions and pruning)
-- Background additions-only mode (--additions-only) for daily scheduled sweeps
+- Configurable pruning settings: suggest-pruning (default: true) and auto-prune (default: false)
 
-Zero external dependencies. Pure Python 3 standard library.
+Zero external dependencies beyond Python 3 standard library.
 """
 
 import argparse
@@ -21,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -30,6 +33,12 @@ GLOBAL_CONFIG_FILE = os.path.join(GLOBAL_CONFIG_DIR, "config.json")
 FALLBACK_CONFIG_FILE = os.path.expanduser("~/.quartermaster/config.json")
 
 DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "skills-library": DEFAULT_LIBRARY_PATH,
+    "suggest-pruning": True,
+    "auto-prune": False,
+}
 
 # Universal Core AI-SDLC Capabilities (apply to any software project regardless of language/stack)
 CORE_AI_SDLC_PACKAGES = {"spark-skills", "agora-adlc", "conductor"}
@@ -82,18 +91,17 @@ def get_active_config_file() -> str:
 
 def load_config() -> Dict[str, Any]:
     """Loads Quartermaster settings from disk or returns defaults."""
+    cfg = dict(DEFAULT_CONFIG)
     cfg_file = get_active_config_file()
     if os.path.exists(cfg_file):
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    return data
+                    cfg.update(data)
         except Exception:
             pass
-    return {
-        "skills-library": DEFAULT_LIBRARY_PATH,
-    }
+    return cfg
 
 
 def save_config(cfg: Dict[str, Any]) -> str:
@@ -114,6 +122,12 @@ def get_config_value(key: str) -> Optional[Any]:
 def set_config_value(key: str, value: Any) -> Dict[str, Any]:
     """Sets a specific configuration value and persists it."""
     cfg = load_config()
+    # Normalize booleans if passed as string
+    if isinstance(value, str):
+        if value.lower() in ("true", "1", "yes", "on"):
+            value = True
+        elif value.lower() in ("false", "0", "no", "off"):
+            value = False
     cfg[key] = value
     save_config(cfg)
     return cfg
@@ -149,16 +163,19 @@ def interactive_config() -> None:
     print("=" * 80)
     print(f"Active Config File: {get_active_config_file()}")
     print("\nSettings:")
-    for k, v in sorted(cfg.items()):
-        print(f"  * {k:<20} = {v}")
+    print(f"  * skills-library  = {cfg.get('skills-library')}")
+    print(f"  * suggest-pruning = {cfg.get('suggest-pruning')} (suggest unneeded skills to remove during sweep)")
+    print(f"  * auto-prune      = {cfg.get('auto-prune')} (automatically remove unneeded skills during sweep)")
 
     print("-" * 80)
     print("Options:")
     print("  1. Update 'skills-library' path")
-    print("  2. Reset settings to default")
-    print("  3. Exit")
+    print(f"  2. Toggle 'suggest-pruning' (currently: {cfg.get('suggest-pruning')})")
+    print(f"  3. Toggle 'auto-prune' (currently: {cfg.get('auto-prune')})")
+    print("  4. Reset settings to default")
+    print("  5. Exit")
 
-    choice = input("\nEnter choice [1-3] (default: 3): ").strip()
+    choice = input("\nEnter choice [1-5] (default: 5): ").strip()
     if choice == "1":
         current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
         new_val = input(f"Enter new skills-library path [{current}]: ").strip()
@@ -173,11 +190,73 @@ def interactive_config() -> None:
             set_config_value("skills-library", expanded)
             print(f"\nUpdated 'skills-library' to: {expanded}")
     elif choice == "2":
-        default_cfg = {"skills-library": DEFAULT_LIBRARY_PATH}
-        save_config(default_cfg)
+        new_val = not cfg.get("suggest-pruning", True)
+        set_config_value("suggest-pruning", new_val)
+        print(f"\nUpdated 'suggest-pruning' to: {new_val}")
+    elif choice == "3":
+        new_val = not cfg.get("auto-prune", False)
+        set_config_value("auto-prune", new_val)
+        print(f"\nUpdated 'auto-prune' to: {new_val}")
+    elif choice == "4":
+        save_config(dict(DEFAULT_CONFIG))
         print("\nSettings reset to default.")
     else:
         print("\nNo changes made.")
+
+
+# ==============================================================================
+# In-Flow Library Import via Git URL
+# ==============================================================================
+
+def import_library_asset(
+    git_url: str,
+    library_path: Optional[str] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """
+    Clones a skill or plugin repository directly into the central skills library.
+    Allows developers to expand their armory without breaking flow.
+    """
+    lib_dir = resolve_library_path(library_path)
+    os.makedirs(lib_dir, exist_ok=True)
+
+    cleaned_url = git_url.strip().rstrip("/")
+    repo_name = os.path.basename(cleaned_url)
+    if repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+
+    dest_dir = os.path.join(lib_dir, repo_name)
+    if os.path.exists(dest_dir):
+        if not force:
+            return {
+                "status": "exists",
+                "message": f"Asset '{repo_name}' already exists in library: {dest_dir}. Use --force to overwrite.",
+                "name": repo_name,
+                "destination": dest_dir,
+            }
+        shutil.rmtree(dest_dir)
+
+    cmd = ["git", "clone", "--depth", "1", git_url, dest_dir]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return {
+            "status": "error",
+            "error": f"Failed to clone repository: {e.stderr or e.stdout}",
+            "git_url": git_url,
+        }
+
+    is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
+    skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
+
+    return {
+        "status": "installed",
+        "name": repo_name,
+        "is_plugin": is_plugin,
+        "skills_count": len(skill_files),
+        "destination": dest_dir,
+        "library_path": lib_dir,
+    }
 
 
 # ==============================================================================
@@ -200,7 +279,6 @@ def parse_skill_frontmatter(content: str) -> Dict[str, Any]:
     if ver_m:
         meta["version"] = ver_m.group(1).strip().strip("\"'")
 
-    # Parse tags
     tags_m = re.search(r"^tags:\s*\[(.*?)\]", fm, re.MULTILINE)
     if tags_m:
         meta["tags"] = [t.strip().strip("\"'") for t in tags_m.group(1).split(",") if t.strip()]
@@ -252,7 +330,7 @@ def parse_plugin_manifest(plugin_json_path: str) -> Dict[str, Any]:
 def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Discovers all packages, plugins, and skills in the configured skills-library.
-    Groups naturally by Package / Plugin on disk without artificial domain silos.
+    Groups naturally by Package / Plugin on disk.
     """
     lib_dir = resolve_library_path(library_path)
     if not os.path.exists(lib_dir):
@@ -315,7 +393,6 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             }
             all_plugins.append(plugin_info)
 
-        # Discover all SKILL.md files inside package
         skill_files = glob.glob(os.path.join(pkg_dir, "**", "SKILL.md"), recursive=True)
         pkg_skills: List[Dict[str, Any]] = []
 
@@ -383,7 +460,7 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
     """
     Scans project root and subdirectories for manifest files.
     Identifies frameworks, detects uninitialized projects,
-    and returns tailored recommendations without hardcoded domain silos.
+    and returns tailored recommendations.
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     if not os.path.exists(proj_dir):
@@ -612,12 +689,12 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
         scoping_dialogue = {
             "prompt": "This workspace appears to be a brand-new project. What type of project are you building?",
             "options": [
-                {"label": "Web or Frontend Application", "match": "web"},
-                {"label": "Mobile or Multiplatform Application", "match": "mobile"},
-                {"label": "Backend API, Cloud or Database Service", "match": "backend"},
-                {"label": "AI Agent or Machine Learning System", "match": "ai"},
-                {"label": "DevOps, Infrastructure or Tooling", "match": "devops"},
-                {"label": "I'm not sure yet", "match": "core_only"},
+                {"label": "Web or Frontend Application"},
+                {"label": "Mobile or Multiplatform Application"},
+                {"label": "Backend API, Cloud or Database Service"},
+                {"label": "AI Agent or Machine Learning System"},
+                {"label": "DevOps, Infrastructure or Tooling"},
+                {"label": "I'm not sure yet"},
             ],
             "recommendation_on_unclear": (
                 "When scope is undecided or 'I\\'m not sure yet' is chosen, Quartermaster equips "
@@ -785,21 +862,28 @@ def provision_assets(
 
 
 # ==============================================================================
-# Quartermaster Sweep (Project & Armory Audit)
+# Quartermaster Sweep (Project & Armory Audit with Pruning Governance)
 # ==============================================================================
 
 def sweep_project(
     project_path: str,
     library_path: Optional[str] = None,
-    additions_only: bool = False,
+    suggest_pruning: Optional[bool] = None,
+    auto_prune: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
-    Audits the current workspace:
+    Audits the workspace:
     1. Checks active inventory in `.agents/`.
     2. Re-scans manifests and dependencies.
-    3. Cross-references armory for newly relevant additions.
-    4. If not additions_only, highlights unneeded stack tools.
+    3. Recommends newly relevant additions.
+    4. Evaluates unneeded stack tools:
+       - If suggest_pruning is True: lists them as removal recommendations.
+       - If auto_prune is True: automatically uninstalls them from `.agents/`.
     """
+    cfg = load_config()
+    final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
+    final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
+
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     scan = detect_stack(proj_dir)
     catalog = get_catalog(library_path)
@@ -858,38 +942,90 @@ def sweep_project(
             })
 
     pruning_candidates: List[Dict[str, Any]] = []
-    if not additions_only:
-        manifest_list = scan.get("manifests_found", [])
-        catalog_skills_by_name = {s["name"].lower(): s for s in catalog.get("skills", [])}
+    pruned_items: List[Dict[str, Any]] = []
 
-        for s in installed_skills:
-            s_name = s["name"].lower()
-            cat_entry = catalog_skills_by_name.get(s_name)
-            if not cat_entry:
-                continue
+    manifest_list = scan.get("manifests_found", [])
+    catalog_skills_by_name = {s["name"].lower(): s for s in catalog.get("skills", [])}
 
-            if cat_entry.get("tier") == "core":
-                continue
+    for s in installed_skills:
+        s_name = s["name"].lower()
+        cat_entry = catalog_skills_by_name.get(s_name)
+        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
+        pkg = (cat_entry.get("package") or "").lower() if cat_entry else s_name
 
-            pkg = cat_entry.get("package", "").lower()
-            if "flutter" in pkg and "pubspec.yaml" not in manifest_list:
-                pruning_candidates.append({
-                    "name": s["name"],
-                    "type": "skill",
-                    "reason": "Flutter skill installed but no pubspec.yaml found in workspace",
-                })
-            elif "firebase" in pkg and not any("firebase" in m for m in manifest_list):
-                pruning_candidates.append({
-                    "name": s["name"],
-                    "type": "skill",
-                    "reason": "Firebase skill installed but no firebase.json / .firebaserc found in workspace",
-                })
-            elif "android" in pkg and not any("android" in m or "gradle" in m for m in manifest_list):
-                pruning_candidates.append({
-                    "name": s["name"],
-                    "type": "skill",
-                    "reason": "Android CLI tool installed but no Android/Gradle manifests found",
-                })
+        # Core AI-SDLC skills are never pruned
+        if tier == "core" or s_name in CORE_AI_SDLC_SKILLS or pkg in CORE_AI_SDLC_PACKAGES:
+            continue
+
+        is_orphaned = False
+        reason = ""
+
+        if ("flutter" in pkg or "flutter" in s_name) and "pubspec.yaml" not in manifest_list:
+            is_orphaned = True
+            reason = "Flutter skill installed but no pubspec.yaml found in workspace"
+        elif ("firebase" in pkg or "firebase" in s_name) and not any("firebase" in m for m in manifest_list):
+            is_orphaned = True
+            reason = "Firebase skill installed but no firebase.json / .firebaserc found in workspace"
+        elif ("android" in pkg or "android" in s_name) and not any("android" in m or "gradle" in m for m in manifest_list):
+            is_orphaned = True
+            reason = "Android CLI tool installed but no Android/Gradle manifests found"
+
+        if is_orphaned:
+            candidate = {
+                "name": s["name"],
+                "type": "skill",
+                "path": s["path"],
+                "reason": reason,
+            }
+            if final_auto_prune:
+                try:
+                    shutil.rmtree(s["path"])
+                    pruned_items.append(candidate)
+                except Exception as e:
+                    candidate["error"] = str(e)
+                    pruning_candidates.append(candidate)
+            elif final_suggest_pruning:
+                pruning_candidates.append(candidate)
+
+    catalog_plugins_by_name = {p["name"].lower(): p for p in catalog.get("plugins", [])}
+    for p in installed_plugins:
+        p_name = p["name"].lower()
+        cat_entry = catalog_plugins_by_name.get(p_name)
+        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
+
+        # Core AI-SDLC plugins are never pruned
+        if tier == "core" or p_name in CORE_AI_SDLC_PACKAGES:
+            continue
+
+        is_orphaned = False
+        reason = ""
+
+        if "flutter" in p_name and "pubspec.yaml" not in manifest_list:
+            is_orphaned = True
+            reason = "Flutter plugin installed but no pubspec.yaml found in workspace"
+        elif "firebase" in p_name and not any("firebase" in m for m in manifest_list):
+            is_orphaned = True
+            reason = "Firebase plugin installed but no firebase.json / .firebaserc found in workspace"
+        elif "android" in p_name and not any("android" in m or "gradle" in m for m in manifest_list):
+            is_orphaned = True
+            reason = "Android CLI plugin installed but no Android/Gradle manifests found"
+
+        if is_orphaned:
+            candidate = {
+                "name": p["name"],
+                "type": "plugin",
+                "path": p["path"],
+                "reason": reason,
+            }
+            if final_auto_prune:
+                try:
+                    shutil.rmtree(p["path"])
+                    pruned_items.append(candidate)
+                except Exception as e:
+                    candidate["error"] = str(e)
+                    pruning_candidates.append(candidate)
+            elif final_suggest_pruning:
+                pruning_candidates.append(candidate)
 
     return {
         "project_path": proj_dir,
@@ -900,8 +1036,10 @@ def sweep_project(
         "installed_plugins": installed_plugins,
         "installed_skills": installed_skills,
         "additions_recommended": additions,
-        "pruning_candidates": pruning_candidates if not additions_only else [],
-        "additions_only_mode": additions_only,
+        "pruning_candidates": pruning_candidates,
+        "pruned_items": pruned_items,
+        "suggest_pruning_enabled": final_suggest_pruning,
+        "auto_prune_enabled": final_auto_prune,
     }
 
 
@@ -948,7 +1086,7 @@ def format_catalog_text(catalog: Dict[str, Any]) -> str:
 
     lines.append("")
     lines.append("=" * 80)
-    lines.append("To provision, run:")
+    lines.append("To provision into a project, run:")
     lines.append("  python3 quartermaster.py --provision <path> --skills <skill1,skill2,...>")
     lines.append("  python3 quartermaster.py --provision <path> --plugins <plugin1,...>")
     lines.append("=" * 80)
@@ -1075,15 +1213,22 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     else:
         lines.append("  (All recommended capabilities for current stack are already provisioned)")
 
-    if not swp.get("additions_only_mode"):
-        pruning = swp.get("pruning_candidates", [])
-        lines.append(f"\n[Potential Pruning Candidates ({len(pruning)})]")
-        if pruning:
-            for pr in pruning:
-                lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30}")
-                lines.append(f"      Note: {pr['reason']}")
-        else:
-            lines.append("  (No obsolete or unneeded capabilities detected)")
+    pruned = swp.get("pruned_items", [])
+    if pruned:
+        lines.append(f"\n[Auto-Pruned Unneeded Capabilities ({len(pruned)})]")
+        for pr in pruned:
+            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30} (removed from .agents/)")
+            lines.append(f"      Note: {pr['reason']}")
+
+    candidates = swp.get("pruning_candidates", [])
+    if candidates:
+        lines.append(f"\n[Suggested Unneeded Capabilities to Remove ({len(candidates)})]")
+        for pr in candidates:
+            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30}")
+            lines.append(f"      Note: {pr['reason']}")
+    elif not pruned and swp.get("suggest_pruning_enabled"):
+        lines.append("\n[Suggested Unneeded Capabilities to Remove (0)]")
+        lines.append("  (No obsolete or unneeded capabilities detected)")
 
     lines.append("\n" + "=" * 80)
     if additions:
@@ -1092,6 +1237,26 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
         lines.append(
             f"  python3 quartermaster.py --provision {swp.get('project_path')} --skills {quick_names}"
         )
+    lines.append("=" * 80)
+    return "\n".join(lines)
+
+
+def format_import_text(res: Dict[str, Any]) -> str:
+    """Formats git import result."""
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("  QUARTERMASTER LIBRARY IMPORT")
+    lines.append("=" * 80)
+    if res.get("status") == "installed":
+        t = "Plugin" if res.get("is_plugin") else "Package/Skill"
+        lines.append(f"Success: Installed {t} '{res.get('name')}' into central library.")
+        lines.append(f"Destination: {res.get('destination')}")
+        lines.append(f"Skills Discovered: {res.get('skills_count')}")
+        lines.append("\nThis capability is now available to be provisioned into any workspace.")
+    elif res.get("status") == "exists":
+        lines.append(f"Notice: {res.get('message')}")
+    else:
+        lines.append(f"Error: {res.get('error')}")
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1141,9 +1306,25 @@ def main() -> int:
         help="Audit current workspace tech, review installed skills, and cross-reference library for additions/pruning.",
     )
     parser.add_argument(
-        "--additions-only",
+        "--auto-prune",
         action="store_true",
-        help="In sweep mode, strictly evaluate additions and suppress pruning recommendations (ideal for scheduled tasks).",
+        help="In sweep mode, automatically remove unneeded skills from .agents/.",
+    )
+    parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="In sweep mode, suppress pruning suggestions (additions only).",
+    )
+    parser.add_argument(
+        "--import",
+        dest="import_url",
+        metavar="GIT_URL",
+        help="Clone and install a skill or plugin git repository directly into your central skills library.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force overwrite when importing into library.",
     )
     parser.add_argument(
         "--config",
@@ -1153,13 +1334,13 @@ def main() -> int:
     parser.add_argument(
         "--config-get",
         metavar="KEY",
-        help="Get the value of a specific configuration setting (e.g. skills-library).",
+        help="Get the value of a specific configuration setting (e.g. skills-library, auto-prune, suggest-pruning).",
     )
     parser.add_argument(
         "--config-set",
         nargs=2,
         metavar=("KEY", "VALUE"),
-        help="Set a configuration setting (e.g. --config-set skills-library /path/to/library).",
+        help="Set a configuration setting (e.g. --config-set auto-prune true).",
     )
     parser.add_argument(
         "--json",
@@ -1174,6 +1355,20 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # Import Git Repo into Central Library
+    if args.import_url:
+        res = import_library_asset(
+            git_url=args.import_url,
+            library_path=args.library,
+            force=args.force,
+        )
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(format_import_text(res))
+        return 0 if res.get("status") in ("installed", "exists") else 1
+
+    # Settings Actions
     if args.config_get:
         val = get_config_value(args.config_get)
         if args.json:
@@ -1184,7 +1379,7 @@ def main() -> int:
 
     if args.config_set:
         key, val = args.config_set
-        cfg = set_config_value(key, os.path.expanduser(val))
+        cfg = set_config_value(key, val)
         if args.json:
             print(json.dumps(cfg, indent=2))
         else:
@@ -1198,6 +1393,7 @@ def main() -> int:
             interactive_config()
         return 0
 
+    # If no action flag passed, show help
     if not args.catalog and args.scan is None and not args.provision and args.sweep is None:
         parser.print_help()
         return 0
@@ -1220,10 +1416,14 @@ def main() -> int:
             return 0
 
         if args.sweep is not None:
+            suggest_prune = False if args.no_prune else None
+            auto_p = True if args.auto_prune else None
+
             swp_res = sweep_project(
                 project_path=args.sweep,
                 library_path=args.library,
-                additions_only=args.additions_only,
+                suggest_pruning=suggest_prune,
+                auto_prune=auto_p,
             )
             if args.json:
                 print(json.dumps(swp_res, indent=2))
