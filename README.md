@@ -17,6 +17,18 @@ Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps 
 
 ---
 
+## Installation
+
+Install Quartermaster as an Antigravity skill with a single command:
+
+```bash
+git clone https://github.com/owainow/quartermaster.git ~/.gemini/skills/quartermaster
+```
+
+That is it. Antigravity discovers the skill automatically. Open any workspace and type `/quartermaster` in chat to get started.
+
+---
+
 ## Why Quartermaster?
 
 When you build with AI coding agents, the default approach is to dump all your skills and plugins into one global folder. That works for the first two days. Then reality catches up:

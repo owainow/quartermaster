@@ -40,7 +40,7 @@ flowchart TD
 1. **Identify Workspace Path**: Determine the active project root directory (defaults to current workspace).
 2. **Execute Stack Scan**:
    ```bash
-   python3 /Users/owaino/quartermaster/scripts/quartermaster.py --scan <project_path> --json
+   python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --scan <project_path> --json
    ```
 3. **Examine Findings**:
    - Check `status`: Is this an active project with manifests, or an `unscoped_new_project`?
@@ -77,7 +77,7 @@ Present the detected technologies and categorize recommendations:
 
 Invite the user to inspect available packages and plugins discovered in the central skills library:
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --catalog
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --catalog
 ```
 Allow the user to select any additional tools they wish to include.
 
@@ -87,7 +87,7 @@ Allow the user to select any additional tools they wish to include.
 
 Once the user confirms their selection, execute the provisioning command:
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py \
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py \
   --provision <project_path> \
   --skills <comma_separated_items>
 ```
@@ -119,7 +119,7 @@ When code evolves or dependencies are added/removed, the user triggers `/quarter
 
 ### Execution:
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path>
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --sweep <project_path>
 ```
 Flags supported:
 - `/quartermaster sweep --auto-prune`: Executes `quartermaster.py --sweep <project_path> --auto-prune` to automatically delete unneeded capabilities.
@@ -145,7 +145,7 @@ When the user pastes a repository URL in chat:
 
 Execute the import engine:
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --import <git_url>
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --import <git_url>
 ```
 
 Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, validates its skill/plugin contents, and reports success back to the user without breaking developer flow.
@@ -156,7 +156,7 @@ Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, valid
 
 When the user runs `/quartermaster catalog`, execute:
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --catalog
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --catalog
 ```
 Present the discovered packages, plugins, and skills from the central library, clearly distinguishing between Core AI-SDLC guardrails and stack-specific tools.
 
@@ -167,12 +167,12 @@ Present the discovered packages, plugins, and skills from the central library, c
 When the user asks to view or change settings:
 ```bash
 # View active settings
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get skills-library
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get auto-prune
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get skills-library
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get auto-prune
 
 # Update a setting
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set <key> <value>
+python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-set <key> <value>
 ```
 
 Settings keys:
@@ -187,7 +187,7 @@ Settings keys:
 To keep workspaces continuously outfitted as code evolves:
 - Quartermaster runs the sweep on a daily schedule:
   ```bash
-  python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path> --json
+  python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --sweep <project_path> --json
   ```
 - **Pruning Governance**:
   - By default, daily sweeps suggest unneeded skills to remove alongside newly recommended additions.
