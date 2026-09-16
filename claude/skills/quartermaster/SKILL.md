@@ -205,7 +205,11 @@ Inspect or update Quartermaster settings:
 QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
-python3 "$QM_SCRIPT" --config
+python3 "$QM_SCRIPT" --config --json
+```
+To inspect a single key:
+```bash
+python3 "$QM_SCRIPT" --config-get <key>
 ```
 To set a specific key:
 ```bash
@@ -218,10 +222,16 @@ python3 "$QM_SCRIPT" --config-set <key> <value>
 ## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
 
 <workflow>
-In Claude Code, background daily sweep alerts are handled by the `SessionStart` lifecycle hook. When `/quartermaster schedule` is run, verify that `claude/hooks/hooks.json` is active, or configure a local crontab entry for automated morning runs:
+In Claude Code, background daily sweep checks run automatically on `SessionStart` when loaded as a plugin (`claude --plugin-dir`).
+
+To configure an automated daily morning sweep without relying on session starts, install or verify an idempotent crontab entry (at 9:00 AM daily, running a safe sweep using configured defaults):
 ```bash
-(crontab -l 2>/dev/null; echo "0 9 * * * python3 ${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py --sweep $(pwd) --auto-prune --harness claude >> $(pwd)/.claude/quartermaster-sweep.log 2>&1") | crontab -
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+CRON_ENTRY="0 9 * * * python3 $QM_SCRIPT --sweep $(pwd) --harness claude >> $(pwd)/.claude/quartermaster-sweep.log 2>&1"
+(crontab -l 2>/dev/null | grep -v -F "quartermaster.py --sweep $(pwd)"; echo "$CRON_ENTRY") | crontab -
 ```
+This ensures safe defaults (respecting `auto-prune: false`) and prevents duplicate crontab lines on repeated runs.
 </workflow>
 
 ---

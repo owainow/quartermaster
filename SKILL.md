@@ -147,8 +147,8 @@ Flags supported:
      - **Aggressive (Default)**: Strict stack alignment. Flags any tool whose associated technology is not actively present in the workspace. Because the central library is local and instant, there is zero penalty to removing unused tools; they can be auto-equipped back in milliseconds if needed later.
      - **Soft**: Conservative retention. Preserves cross-cutting tools (e.g. web devtools or design craft) unless hard manifest contradictions exist.
    - If `auto-prune` is enabled (`true`), deletes them automatically from `.agents/`.
-   - If `suggest-pruning` is enabled (`true`, default), lists them as removal recommendations so the developer can decide.
-   - Core capabilities (marked with a `.core` file, such as `spec`, `pr-review`, `preflight`, `wayfinder`, `pm`) are permanent guardrails and are never marked for pruning.
+    - If `suggest-pruning` is enabled (`true`, default), lists them as removal recommendations so the developer can decide.
+    - Core capabilities (marked with a `.core` file or tagged `core: true` in manifests) are permanent guardrails and are never marked for pruning.
 
 ---
 
@@ -179,7 +179,7 @@ Quartermaster performs dual action:
 
 Quartermaster uses a deterministic `.core` marker file inside skill and plugin folders to identify permanent guardrails. Core capabilities are always auto-equipped on onboarding and are strictly immune to sweep pruning.
 
-Conventional workflow capabilities (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`, `review`) are automatically bootstrapped with `.core` files during scans, catalog checks, or sweeps.
+Core status is deterministic: any capability containing a `.core` marker file or tagged `core: true` in its manifest is recognized as Core. Users can also designate custom packages or tools as Core via `/quartermaster core add <name>`.
 
 Users can also explicitly designate custom packages or tools as Core:
 
@@ -241,9 +241,11 @@ Settings keys:
 ## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
 
 When the user runs `/quartermaster schedule`:
-1. Actively call the `schedule` tool:
-   - `CronExpression`: `"0 9 * * *"`
-   - `IsDaemon`: `true`
-   - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
-2. Confirm to the user:
-   *"Automated daily sweep is active! Quartermaster will audit this project every morning at 9:00 AM and notify you only if additions or cleanup recommendations are detected."*
+- **Google Antigravity (AGY)**: Call the native `schedule` tool:
+  - `CronExpression`: `"0 9 * * *"`
+  - `IsDaemon`: `true`
+  - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
+  - Confirm to the user:
+    *"Automated daily sweep is active! Quartermaster will audit this project every morning at 9:00 AM and notify you only if additions or cleanup recommendations are detected."*
+- **Anthropic Claude Code**: If running in plugin mode (`claude --plugin-dir`), background daily sweep checks run automatically on `SessionStart`. Alternatively, set up an idempotent crontab entry running `quartermaster.py --sweep $(pwd) --harness claude`.
+- **OpenAI Codex**: Configure a cron schedule or record routine audit instructions in `AGENTS.md`.

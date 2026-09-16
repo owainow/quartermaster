@@ -53,10 +53,12 @@ python3 "$QM_SCRIPT" --sweep . --harness codex
 ```
 
 Supported flags:
+- `--check-only`: Perform a strictly read-only check (no additions equipped, no pruning, no AGENTS.md rewrites).
 - `--aggressive`: Enforce strict stack alignment (default).
 - `--soft`: Conservative retention for auxiliary tools.
 - `--auto-prune`: Remove unneeded tools not protected by `.core` markers.
 - `--no-auto-add`: Output recommendations only without auto-equipping.
+- `--no-prune`: Suppress pruning recommendations and guarantee zero deletions.
 
 ### 3. In-Flow Git Import
 Import an external repository or extract a specific skill into the armory and active workspace:

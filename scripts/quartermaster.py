@@ -403,49 +403,99 @@ def get_config_value(key: str, harness: Optional[str] = None) -> Optional[Any]:
     return cfg.get(key)
 
 
+ALLOWED_CONFIG_KEYS = {
+    "skills-library",
+    "auto-add",
+    "suggest-pruning",
+    "auto-prune",
+    "pruning-mode",
+    "prune-mode",
+    "harness",
+}
+
+
 def set_config_value(key: str, value: Any, harness: Optional[str] = None) -> Dict[str, Any]:
-    """Sets a specific configuration value and persists it."""
+    """Sets a specific configuration value and persists it with strict validation."""
+    key_norm = str(key).strip().lower()
+    if key_norm == "prune-mode":
+        key_norm = "pruning-mode"
+
+    if key_norm not in ALLOWED_CONFIG_KEYS:
+        valid_keys = ", ".join(sorted(["skills-library", "auto-add", "suggest-pruning", "auto-prune", "pruning-mode", "harness"]))
+        raise ValueError(f"Invalid configuration key '{key}'. Allowed keys: {valid_keys}")
+
     cfg = load_config(harness)
-    # Normalize booleans if passed as string
-    if isinstance(value, str):
-        if value.lower() in ("true", "1", "yes", "on"):
-            value = True
-        elif value.lower() in ("false", "0", "no", "off"):
-            value = False
-        elif key in ("pruning-mode", "prune-mode"):
-            value = value.lower()
-            if value not in ("aggressive", "soft"):
-                value = "aggressive"
-    if key == "prune-mode":
-        key = "pruning-mode"
-    cfg[key] = value
+
+    if key_norm in ("auto-add", "suggest-pruning", "auto-prune"):
+        if isinstance(value, bool):
+            val = value
+        elif isinstance(value, str):
+            v_lower = value.strip().lower()
+            if v_lower in ("true", "1", "yes", "on"):
+                val = True
+            elif v_lower in ("false", "0", "no", "off"):
+                val = False
+            else:
+                raise ValueError(
+                    f"Invalid boolean value '{value}' for '{key_norm}'. Expected true or false."
+                )
+        elif isinstance(value, (int, float)):
+            val = bool(value)
+        else:
+            raise ValueError(
+                f"Invalid boolean value '{value}' for '{key_norm}'. Expected true or false."
+            )
+        cfg[key_norm] = val
+    elif key_norm == "pruning-mode":
+        v_str = str(value).strip().lower()
+        if v_str not in ("aggressive", "soft"):
+            raise ValueError(
+                f"Invalid pruning-mode '{value}'. Allowed modes: aggressive, soft"
+            )
+        cfg[key_norm] = v_str
+    elif key_norm == "harness":
+        v_str = str(value).strip().lower()
+        if v_str not in SUPPORTED_HARNESSES:
+            valid_h = ", ".join(SUPPORTED_HARNESSES)
+            raise ValueError(f"Invalid harness '{value}'. Allowed harnesses: {valid_h}")
+        cfg[key_norm] = v_str
+    elif key_norm == "skills-library":
+        v_str = str(value).strip()
+        if not v_str:
+            raise ValueError("skills-library path cannot be empty.")
+        cfg[key_norm] = os.path.abspath(os.path.expanduser(v_str))
+
     save_config(cfg, harness)
     return cfg
 
 
-def resolve_library_path(custom_path: Optional[str] = None) -> str:
+def resolve_library_path(custom_path: Optional[str] = None, harness: Optional[str] = None) -> str:
     """
     Resolve the active Quartermaster library path:
     1. CLI argument (--library)
     2. Configured 'skills-library' setting
     3. Existing library in PROBE_LIBRARY_DIRS
-    4. Default location (~/.gemini/skills-library)
+    4. Harness-specific default:
+       - claude: ~/.claude/skills-library
+       - codex: ~/.agents/skills-library
+       - agy / fallback: ~/.gemini/skills-library
     """
     if custom_path:
-        expanded = os.path.abspath(os.path.expanduser(custom_path))
-        if os.path.exists(expanded):
-            return expanded
+        return os.path.abspath(os.path.expanduser(custom_path))
 
-    cfg = load_config()
+    cfg = load_config(harness)
     configured_lib = cfg.get("skills-library")
     if configured_lib:
-        expanded = os.path.abspath(os.path.expanduser(configured_lib))
-        if os.path.exists(expanded):
-            return expanded
+        return os.path.abspath(os.path.expanduser(configured_lib))
 
     for p in PROBE_LIBRARY_DIRS:
         if os.path.exists(p):
             return p
+
+    if harness == "claude":
+        return os.path.abspath(os.path.expanduser("~/.claude/skills-library"))
+    elif harness == "codex":
+        return os.path.abspath(os.path.expanduser("~/.agents/skills-library"))
 
     return os.path.abspath(DEFAULT_LIBRARY_PATH)
 
@@ -465,6 +515,10 @@ def interactive_config() -> None:
     current_prune_mode = cfg.get("pruning-mode") or cfg.get("prune-mode") or "aggressive"
     print(f"  * pruning-mode    = {current_prune_mode} (aggressive = strict stack alignment; soft = conservative retention)")
 
+    # In non-interactive agent environments, avoid blocking on input() or throwing EOFError
+    if not sys.stdin.isatty():
+        return
+
     print("-" * 80)
     print("Options:")
     print("  1. Update 'skills-library' path")
@@ -475,41 +529,44 @@ def interactive_config() -> None:
     print("  6. Reset settings to default")
     print("  7. Exit")
 
-    choice = input("\nEnter choice [1-7] (default: 7): ").strip()
-    if choice == "1":
-        current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
-        new_val = input(f"Enter new skills-library path [{current}]: ").strip()
-        if new_val:
-            expanded = os.path.abspath(os.path.expanduser(new_val))
-            if not os.path.exists(expanded):
-                print(f"\nWarning: Path does not exist on disk: {expanded}")
-                confirm = input("Save anyway? (y/N): ").strip().lower()
-                if confirm != "y":
-                    print("Operation cancelled.")
-                    return
-            set_config_value("skills-library", expanded)
-            print(f"\nUpdated 'skills-library' to: {expanded}")
-    elif choice == "2":
-        new_val = not cfg.get("auto-add", True)
-        set_config_value("auto-add", new_val)
-        print(f"\nUpdated 'auto-add' to: {new_val}")
-    elif choice == "3":
-        new_val = not cfg.get("suggest-pruning", True)
-        set_config_value("suggest-pruning", new_val)
-        print(f"\nUpdated 'suggest-pruning' to: {new_val}")
-    elif choice == "4":
-        new_val = not cfg.get("auto-prune", False)
-        set_config_value("auto-prune", new_val)
-        print(f"\nUpdated 'auto-prune' to: {new_val}")
-    elif choice == "5":
-        new_val = "soft" if current_prune_mode.lower() == "aggressive" else "aggressive"
-        set_config_value("pruning-mode", new_val)
-        print(f"\nUpdated 'pruning-mode' to: {new_val}")
-    elif choice == "6":
-        save_config(dict(DEFAULT_CONFIG))
-        print("\nSettings reset to default.")
-    else:
-        print("\nNo changes made.")
+    try:
+        choice = input("\nEnter choice [1-7] (default: 7): ").strip()
+        if choice == "1":
+            current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
+            new_val = input(f"Enter new skills-library path [{current}]: ").strip()
+            if new_val:
+                expanded = os.path.abspath(os.path.expanduser(new_val))
+                if not os.path.exists(expanded):
+                    print(f"\nWarning: Path does not exist on disk: {expanded}")
+                    confirm = input("Save anyway? (y/N): ").strip().lower()
+                    if confirm != "y":
+                        print("Operation cancelled.")
+                        return
+                set_config_value("skills-library", expanded)
+                print(f"\nUpdated 'skills-library' to: {expanded}")
+        elif choice == "2":
+            new_val = not cfg.get("auto-add", True)
+            set_config_value("auto-add", new_val)
+            print(f"\nUpdated 'auto-add' to: {new_val}")
+        elif choice == "3":
+            new_val = not cfg.get("suggest-pruning", True)
+            set_config_value("suggest-pruning", new_val)
+            print(f"\nUpdated 'suggest-pruning' to: {new_val}")
+        elif choice == "4":
+            new_val = not cfg.get("auto-prune", False)
+            set_config_value("auto-prune", new_val)
+            print(f"\nUpdated 'auto-prune' to: {new_val}")
+        elif choice == "5":
+            new_val = "soft" if current_prune_mode.lower() == "aggressive" else "aggressive"
+            set_config_value("pruning-mode", new_val)
+            print(f"\nUpdated 'pruning-mode' to: {new_val}")
+        elif choice == "6":
+            save_config(dict(DEFAULT_CONFIG))
+            print("\nSettings reset to default.")
+        else:
+            print("\nNo changes made.")
+    except (EOFError, KeyboardInterrupt):
+        print("\nSession ended.")
 
 
 # ==============================================================================
@@ -562,6 +619,23 @@ def find_project_root(start_dir: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def git_clone_ref(clone_url: str, dest_dir: str, target_ref: Optional[str] = None) -> None:
+    """Clones a git repository, pinning to target_ref (branch/tag/commit) if provided."""
+    if target_ref:
+        # First attempt: shallow clone targeting branch or tag directly
+        cmd = ["git", "clone", "--depth", "1", "-b", target_ref, "--", clone_url, dest_dir]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            return
+        # Second attempt: if target_ref is a full commit hash or branch had deep slashes
+        cmd = ["git", "clone", "--depth", "50", "--", clone_url, dest_dir]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(["git", "checkout", target_ref], cwd=dest_dir, capture_output=True, text=True, check=True)
+    else:
+        cmd = ["git", "clone", "--depth", "1", "--", clone_url, dest_dir]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+
 def import_library_asset(
     git_url: str,
     library_path: Optional[str] = None,
@@ -589,7 +663,7 @@ def import_library_asset(
     also immediately provisions the imported capability into that project's .claude/skills/
     or .agents/skills/ depending on the detected harness.
     """
-    lib_dir = resolve_library_path(library_path)
+    lib_dir = resolve_library_path(library_path, harness=harness)
     os.makedirs(lib_dir, exist_ok=True)
 
     if not git_url or git_url.strip().startswith("-"):
@@ -603,29 +677,32 @@ def import_library_asset(
     clone_url = cleaned_url
     target_subpath: Optional[str] = None
     target_skill_name: Optional[str] = None
+    target_ref: Optional[str] = None
 
     # Pattern 1: GitHub / GitLab blob or tree URLs
     gh_match = re.match(
-        r"^(https?://(?:github\.com|gitlab\.com)/[^/]+/[^/]+?)(?:/(?:-|blob|tree)/[^/]+(?:/(.*))?)?$",
+        r"^(https?://(?:github\.com|gitlab\.com)/[^/]+/[^/]+?)(?:/(?:-|blob|tree)/([^/]+)(?:/(.*))?)?$",
         cleaned_url,
     )
     # Pattern 2: raw.githubusercontent.com URLs
     raw_match = re.match(
-        r"^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.*)$",
+        r"^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.*)$",
         cleaned_url,
     )
 
     if gh_match:
         base_repo = gh_match.group(1)
         clone_url = base_repo if base_repo.endswith(".git") else base_repo + ".git"
-        sub = gh_match.group(2) or ""
+        target_ref = gh_match.group(2)
+        sub = gh_match.group(3) or ""
         if sub:
             target_subpath = sub
     elif raw_match:
         owner = raw_match.group(1)
         repo = raw_match.group(2)
         clone_url = f"https://github.com/{owner}/{repo}.git"
-        target_subpath = raw_match.group(3)
+        target_ref = raw_match.group(3)
+        target_subpath = raw_match.group(4)
 
     if target_subpath:
         parts = [p for p in target_subpath.split("/") if p and p != "SKILL.md"]
@@ -645,13 +722,12 @@ def import_library_asset(
     # CASE 1: Targeted skill extracted from repository
     if target_skill_name:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            cmd = ["git", "clone", "--depth", "1", "--", clone_url, tmp_dir]
             try:
-                subprocess.run(cmd, capture_output=True, text=True, check=True)
+                git_clone_ref(clone_url, tmp_dir, target_ref)
             except subprocess.CalledProcessError as e:
                 return {
                     "status": "error",
-                    "error": f"Failed to clone repository from {clone_url}: {e.stderr or e.stdout}",
+                    "error": f"Failed to clone repository from {clone_url} (ref: {target_ref}): {e.stderr or e.stdout}",
                     "git_url": git_url,
                 }
 
@@ -802,9 +878,8 @@ def import_library_asset(
             else:
                 shutil.rmtree(dest_dir)
 
-        cmd = ["git", "clone", "--depth", "1", "--", clone_url, dest_dir]
         try:
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            git_clone_ref(clone_url, dest_dir, target_ref)
             status = "installed"
             message = f"Installed '{repo_name}' into central library: {dest_dir}."
         except subprocess.CalledProcessError as e:
@@ -917,12 +992,12 @@ def parse_plugin_manifest(plugin_json_path: str) -> Dict[str, Any]:
 # Armory Cataloging (Natural Package & Plugin Discovery)
 # ==============================================================================
 
-def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
+def get_catalog(library_path: Optional[str] = None, harness: Optional[str] = None) -> Dict[str, Any]:
     """
     Discovers all packages, plugins, and skills in the configured skills-library.
     Groups naturally by Package / Plugin on disk.
     """
-    lib_dir = resolve_library_path(library_path)
+    lib_dir = resolve_library_path(library_path, harness=harness)
     if not os.path.exists(lib_dir):
         return {
             "library_path": lib_dir,
@@ -1060,7 +1135,11 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 # Workspace Reconnaissance & Stack Matching
 # ==============================================================================
 
-def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[str, Any]:
+def detect_stack(
+    project_path: str,
+    library_path: Optional[str] = None,
+    harness: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Scans project root and subdirectories for manifest files.
     Identifies frameworks, detects uninitialized projects,
@@ -1345,9 +1424,10 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
                 detected_tech_tags.update(["docker", "container", "devops", "cloud"])
 
     # 3. Dynamic Catalog Recommendations
-    lib_path = resolve_library_path(library_path)
+    active_h = detect_harness(proj_dir, harness)
+    lib_path = resolve_library_path(library_path, harness=active_h)
     try:
-        catalog = get_catalog(lib_path)
+        catalog = get_catalog(lib_path, harness=active_h)
     except Exception:
         catalog = {}
 
@@ -1493,7 +1573,7 @@ def provision_assets(
     active_harness = detect_harness(proj_dir, harness)
     target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
-    catalog = get_catalog(library_path)
+    catalog = get_catalog(library_path, harness=active_harness)
     all_skills = catalog.get("skills", [])
     all_plugins = catalog.get("plugins", [])
 
@@ -1537,38 +1617,122 @@ def provision_assets(
         if is_plugin_match and force_type != "skill":
             plugin = plugin_map[req_norm]
             canonical_name = plugin["name"]
-            dest_parent = target_plugins_dir if target_plugins_dir else target_skills_dir
-            dest_dir = os.path.join(dest_parent, canonical_name)
+            src_dir = plugin["source_dir"]
+            is_core_plugin = (plugin["tier"] == "core")
 
-            if dest_dir not in seen_destinations:
-                seen_destinations.add(dest_dir)
-                os.makedirs(dest_parent, exist_ok=True)
-                src_dir = plugin["source_dir"]
-                shutil.copytree(
-                    src_dir,
-                    dest_dir,
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
-                )
+            if target_plugins_dir:
+                # Harness supports separate plugins directory (.agents/plugins/)
+                dest_dir = os.path.join(target_plugins_dir, canonical_name)
+                if dest_dir not in seen_destinations:
+                    seen_destinations.add(dest_dir)
+                    os.makedirs(target_plugins_dir, exist_ok=True)
+                    shutil.copytree(
+                        src_dir,
+                        dest_dir,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                    )
 
-                if plugin["tier"] == "core":
-                    try:
-                        with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
+                    if is_core_plugin:
+                        try:
+                            with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                f.write("# Quartermaster Core Capability\n")
+                        except Exception:
+                            pass
 
-                file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
-                provisioned.append({
-                    "name": canonical_name,
-                    "type": "plugin",
-                    "package": plugin["package"],
-                    "tier": plugin["tier"],
-                    "source": src_dir,
-                    "destination": dest_dir,
-                    "files_copied": file_count,
-                    "status": "provisioned",
-                })
+                    file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                    provisioned.append({
+                        "name": canonical_name,
+                        "type": "plugin",
+                        "package": plugin["package"],
+                        "tier": plugin["tier"],
+                        "source": src_dir,
+                        "destination": dest_dir,
+                        "files_copied": file_count,
+                        "status": "provisioned",
+                    })
+            else:
+                # Harness only discovers top-level skills with SKILL.md (e.g. Claude Code in .claude/skills/)
+                # Unpack inner skills directly into target_skills_dir/<inner_skill_name>/ to avoid invisible husks
+                pkg_key = plugin["package"].lower()
+                matching_inner_skills = list(skill_by_pkg.get(pkg_key, []))
+
+                # Also look directly for skills/ directory inside plugin source
+                inner_skills_dir = os.path.join(src_dir, "skills")
+                if os.path.isdir(inner_skills_dir):
+                    for sub in sorted(os.listdir(inner_skills_dir)):
+                        sub_path = os.path.join(inner_skills_dir, sub)
+                        if os.path.isdir(sub_path) and os.path.exists(os.path.join(sub_path, "SKILL.md")):
+                            if not any(s.get("dir_name") == sub or s.get("name") == sub for s in matching_inner_skills):
+                                matching_inner_skills.append({
+                                    "name": sub,
+                                    "dir_name": sub,
+                                    "package": plugin["package"],
+                                    "tier": plugin["tier"],
+                                    "source_dir": sub_path,
+                                })
+
+                if matching_inner_skills:
+                    for inner_s in matching_inner_skills:
+                        inner_name = inner_s["name"]
+                        dest_dir = os.path.join(target_skills_dir, inner_name)
+                        if dest_dir not in seen_destinations:
+                            seen_destinations.add(dest_dir)
+                            os.makedirs(target_skills_dir, exist_ok=True)
+                            shutil.copytree(
+                                inner_s["source_dir"],
+                                dest_dir,
+                                dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                            )
+                            if is_core_plugin or (inner_s.get("tier") == "core"):
+                                try:
+                                    with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                        f.write("# Quartermaster Core Capability\n")
+                                except Exception:
+                                    pass
+
+                            file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                            provisioned.append({
+                                "name": inner_name,
+                                "type": "skill",
+                                "package": plugin["package"],
+                                "tier": "core" if is_core_plugin else inner_s.get("tier", "stack"),
+                                "source": inner_s["source_dir"],
+                                "destination": dest_dir,
+                                "files_copied": file_count,
+                                "status": "provisioned",
+                            })
+                elif os.path.exists(os.path.join(src_dir, "SKILL.md")):
+                    # Standalone plugin with a top-level SKILL.md
+                    dest_dir = os.path.join(target_skills_dir, canonical_name)
+                    if dest_dir not in seen_destinations:
+                        seen_destinations.add(dest_dir)
+                        os.makedirs(target_skills_dir, exist_ok=True)
+                        shutil.copytree(
+                            src_dir,
+                            dest_dir,
+                            dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                        )
+                        if is_core_plugin:
+                            try:
+                                with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                    f.write("# Quartermaster Core Capability\n")
+                            except Exception:
+                                pass
+                        file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                        provisioned.append({
+                            "name": canonical_name,
+                            "type": "skill",
+                            "package": plugin["package"],
+                            "tier": plugin["tier"],
+                            "source": src_dir,
+                            "destination": dest_dir,
+                            "files_copied": file_count,
+                            "status": "provisioned",
+                        })
+
             handled = True
 
         # Route 2: Standalone Skill Provisioning
@@ -1672,22 +1836,34 @@ def sweep_project(
     auto_prune: Optional[bool] = None,
     pruning_mode: Optional[str] = None,
     harness: Optional[str] = None,
+    check_only: bool = False,
 ) -> Dict[str, Any]:
     """
     Audits the workspace:
     1. Checks active inventory in project capability directories (.claude/skills/ or .agents/).
     2. Re-scans manifests and dependencies.
     3. Identifies newly relevant additions:
-       - If auto_add is True (default): automatically provisions them.
+       - If auto_add is True and check_only is False: automatically provisions them.
     4. Evaluates unneeded stack tools:
        - Pruning mode can be 'aggressive' (strict stack alignment) or 'soft' (conservative retention).
        - If suggest_pruning is True: lists them as removal recommendations.
-       - If auto_prune is True: automatically uninstalls them.
+       - If auto_prune is True and check_only is False: automatically uninstalls them.
     """
-    cfg = load_config()
-    final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
-    final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
-    final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
+    proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    active_harness = detect_harness(proj_dir, harness)
+    cfg = load_config(active_harness)
+
+    if check_only:
+        final_auto_add = False
+        final_auto_prune = False
+        final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
+    else:
+        final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
+        final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
+        if auto_prune is False:
+            final_auto_prune = False
+        else:
+            final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
 
     raw_mode = (
         pruning_mode
@@ -1698,23 +1874,26 @@ def sweep_project(
     if final_pruning_mode not in ("aggressive", "soft"):
         final_pruning_mode = "aggressive"
 
-    proj_dir = os.path.abspath(os.path.expanduser(project_path))
-    active_harness = detect_harness(proj_dir, harness)
-    scan = detect_stack(proj_dir, library_path=library_path)
-    catalog = get_catalog(library_path)
+    scan = detect_stack(proj_dir, library_path=library_path, harness=active_harness)
+    catalog = get_catalog(library_path, harness=active_harness)
 
     target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
     installed_skills: List[Dict[str, Any]] = []
+    husk_dirs: List[str] = []
     if target_skills_dir and os.path.exists(target_skills_dir):
         for s_name in sorted(os.listdir(target_skills_dir)):
             s_path = os.path.join(target_skills_dir, s_name)
             if os.path.isdir(s_path):
-                installed_skills.append({
-                    "name": s_name,
-                    "path": s_path,
-                    "type": "skill",
-                })
+                has_skill_md = os.path.exists(os.path.join(s_path, "SKILL.md"))
+                if has_skill_md:
+                    installed_skills.append({
+                        "name": s_name,
+                        "path": s_path,
+                        "type": "skill",
+                    })
+                else:
+                    husk_dirs.append(s_path)
 
     installed_plugins: List[Dict[str, Any]] = []
     if target_plugins_dir and os.path.exists(target_plugins_dir):
@@ -1735,6 +1914,16 @@ def sweep_project(
     for rec_plugin in scan.get("recommended_plugins", []):
         p_name = rec_plugin["name"].lower()
         if p_name not in installed_plugin_names:
+            if not target_plugins_dir:
+                # In harnesses without dedicated plugin folders (e.g. Claude Code), plugins unpack into skills
+                p_pkg = (rec_plugin.get("package") or rec_plugin["name"]).lower()
+                pkg_skills = [
+                    s["name"].lower()
+                    for s in catalog.get("skills", [])
+                    if (s.get("package") or "").lower() == p_pkg
+                ]
+                if pkg_skills and all(s in installed_skill_names for s in pkg_skills):
+                    continue
             additions.append({
                 "name": rec_plugin["name"],
                 "type": "plugin",
@@ -1975,16 +2164,41 @@ def sweep_project(
             elif final_suggest_pruning:
                 pruning_candidates.append(candidate)
 
+    for hd in husk_dirs:
+        h_name = os.path.basename(hd)
+        candidate = {
+            "name": h_name,
+            "type": "husk",
+            "path": hd,
+            "reason": f"Directory '{h_name}' in skills folder contains no SKILL.md and cannot be discovered by agent harness",
+        }
+        if final_auto_prune and not check_only:
+            try:
+                if os.path.islink(hd):
+                    os.unlink(hd)
+                else:
+                    shutil.rmtree(hd)
+                pruned_items.append(candidate)
+            except Exception as e:
+                candidate["error"] = str(e)
+                pruning_candidates.append(candidate)
+        elif final_suggest_pruning:
+            pruning_candidates.append(candidate)
+
     pruned_paths = {item["path"] for item in pruned_items if "path" in item}
     pruned_names = {item["name"] for item in pruned_items if "name" in item}
     remaining_skills = [s for s in installed_skills if s["path"] not in pruned_paths and s["name"] not in pruned_names]
     remaining_plugins = [p for p in installed_plugins if p["path"] not in pruned_paths and p["name"] not in pruned_names]
 
-    synced_docs = sync_project_docs(proj_dir, active_harness, remaining_skills, remaining_plugins)
+    if check_only:
+        synced_docs = {}
+    else:
+        synced_docs = sync_project_docs(proj_dir, active_harness, remaining_skills, remaining_plugins)
 
     return {
         "project_path": proj_dir,
         "harness": active_harness,
+        "check_only": check_only,
         "synced_docs": synced_docs,
         "library_path": catalog.get("library_path"),
         "scan_status": scan.get("status"),
@@ -2689,6 +2903,13 @@ def main() -> int:
         help="In sweep mode, do not automatically equip newly recommended capabilities (recommendation only).",
     )
     parser.add_argument(
+        "--check-only",
+        "--dry-run",
+        dest="check_only",
+        action="store_true",
+        help="In sweep mode, perform a strictly read-only check: do not auto-add, do not auto-prune, and do not rewrite CLAUDE.md/AGENTS.md.",
+    )
+    parser.add_argument(
         "--import",
         dest="import_url",
         metavar="GIT_URL",
@@ -2832,7 +3053,11 @@ def main() -> int:
 
     if args.config_set:
         key, val = args.config_set
-        cfg = set_config_value(key, val)
+        try:
+            cfg = set_config_value(key, val, harness=args.harness)
+        except ValueError as e:
+            sys.stderr.write(f"Error: {e}\n")
+            return 1
         if args.json:
             print(json.dumps(cfg, indent=2))
         else:
@@ -2903,9 +3128,15 @@ def main() -> int:
             return 0
 
         if args.sweep is not None:
-            suggest_prune = False if args.no_prune else None
-            auto_p = True if args.auto_prune else None
-            auto_a = False if args.no_auto_add else None
+            if args.check_only:
+                suggest_prune = False if args.no_prune else None
+                auto_p = False
+                auto_a = False
+            else:
+                suggest_prune = False if args.no_prune else None
+                auto_p = False if args.no_prune else (True if args.auto_prune else None)
+                auto_a = False if args.no_auto_add else None
+
             p_mode = None
             if args.aggressive:
                 p_mode = "aggressive"
@@ -2920,6 +3151,7 @@ def main() -> int:
                 auto_prune=auto_p,
                 pruning_mode=p_mode,
                 harness=args.harness,
+                check_only=args.check_only,
             )
             if args.json:
                 print(json.dumps(swp_res, indent=2))

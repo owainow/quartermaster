@@ -21,8 +21,12 @@ def main():
         if cwd in (home, "/", "/tmp"):
             sys.exit(0)
 
-        marker_dir = os.path.join(cwd, ".claude")
-        marker_file = os.path.join(marker_dir, ".quartermaster-last-sweep")
+        # Store cache timestamps in user config directory, never inside the active workspace
+        import hashlib
+        cache_dir = os.path.expanduser("~/.claude/quartermaster/sweep_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        cwd_hash = hashlib.sha256(cwd.encode("utf-8")).hexdigest()[:16]
+        marker_file = os.path.join(cache_dir, f"{cwd_hash}.timestamp")
 
         now = time.time()
         if os.path.exists(marker_file):
@@ -37,7 +41,6 @@ def main():
 
         # Write early timestamp to prevent session startup freeze loops
         try:
-            os.makedirs(marker_dir, exist_ok=True)
             with open(marker_file, "w", encoding="utf-8") as f:
                 f.write(str(now))
         except Exception:
@@ -61,12 +64,13 @@ def main():
         if not qm_script:
             sys.exit(0)
 
+        # Run in strictly read-only check mode: zero file additions, zero pruning, no CLAUDE.md rewrites
         cmd = [
             sys.executable,
             qm_script,
             "--sweep", cwd,
             "--harness", "claude",
-            "--no-auto-add",
+            "--check-only",
             "--json",
         ]
 
