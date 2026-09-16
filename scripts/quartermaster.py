@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Quartermaster - Project Onboarding and Skill Provisioning Engine
+Quartermaster - Project-Scoped Capability Provisioner & Armory Engine
 Scans project tech stacks, discovers available skills and plugins from an external armory library,
 and provisions scoped, tailored capabilities directly into `<project_path>/.agents/`.
 
-Supports:
+Features:
 - External skills-library referencing with interactive settings configuration
-- Full Antigravity plugin provisioning (.agents/plugins/) and standalone skill provisioning (.agents/skills/)
-- Semantic capability tiers: General AI-SDLC vs Domain-Specific
-- Interactive brand-new project scoping with "I'm not sure yet" support
-- Quartermaster Sweep (--sweep) for ongoing auditing (additions and pruning)
-- Non-intrusive background additions-only mode (--additions-only) for daily scheduled sweeps
+- Dual provisioning: Full plugins (.agents/plugins/) and standalone skills (.agents/skills/)
+- Clean capability tiers: Core AI-SDLC (universal) vs Stack-Specific
+- Interactive brand-new project scoping with "I'm not sure yet" fallback
+- Project sweep (--sweep) for ongoing audits (additions and pruning)
+- Background additions-only mode (--additions-only) for daily scheduled sweeps
 
 Zero external dependencies. Pure Python 3 standard library.
 """
@@ -31,87 +31,39 @@ FALLBACK_CONFIG_FILE = os.path.expanduser("~/.quartermaster/config.json")
 
 DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
 
-# 7 Core Armory Categories and Package Mappings
-CATEGORIES_DEF = [
-    {
-        "name": "Mobile & Multiplatform",
-        "packages": ["flutter", "android-cli-plugin", "android-cli"],
-        "display_name": "Mobile & Multiplatform (flutter, android-cli)",
-        "description": "Cross-platform mobile apps (Flutter, Dart) and Android CLI tooling",
-    },
-    {
-        "name": "Web, Frontend & Design",
-        "packages": [
-            "chrome-devtools-plugin",
-            "chrome-devtools",
-            "modern-web-guidance-plugin",
-            "modern-web-guidance",
-            "impeccable",
-        ],
-        "display_name": "Web, Frontend & Design (chrome-devtools, modern-web-guidance, impeccable)",
-        "description": "High-craft frontend design, modern web architecture, DevTools debugging & extensions",
-    },
-    {
-        "name": "Cloud & Backend",
-        "packages": ["firebase", "cloudrun"],
-        "display_name": "Cloud & Backend (firebase, cloudrun)",
-        "description": "Firebase ecosystem (Firestore, Auth, Hosting, Rules) and Cloud Run serverless deployment",
-    },
-    {
-        "name": "Testing, Spec-Driven Development & ADLC",
-        "packages": ["spark-skills", "agora-adlc", "conductor"],
-        "display_name": "Testing, Spec-Driven Development & ADLC (spark-skills, agora-adlc, conductor)",
-        "description": "Autonomous SDLC (ADLC), Conductor track management, spec generation, code review & preflight",
-    },
-    {
-        "name": "Synthetic Data & Simulation",
-        "packages": ["synthetikos"],
-        "display_name": "Synthetic Data & Simulation (synthetikos)",
-        "description": "Synthetic customer/colleague personas, multi-agent simulation & evaluation datasets",
-    },
-    {
-        "name": "Science & Bio-Informatics",
-        "packages": ["science"],
-        "display_name": "Science & Bio-Informatics (science)",
-        "description": "Computational biology, literature search (arXiv/PubMed), PDB/AlphaFold, genomics & drug discovery",
-    },
-    {
-        "name": "AI Agent Development",
-        "packages": ["google-antigravity-sdk"],
-        "display_name": "AI Agent Development (google-antigravity-sdk)",
-        "description": "Antigravity agent workflows, prompt engineering, subagent orchestration & evaluation",
-    },
-]
-
-# Capability Classification: General AI-SDLC vs Domain-Specific
-GENERAL_AI_SDLC_PACKAGES = {"spark-skills", "agora-adlc", "conductor"}
-GENERAL_AI_SDLC_SKILLS = {
+# Universal Core AI-SDLC Capabilities (apply to any software project regardless of language/stack)
+CORE_AI_SDLC_PACKAGES = {"spark-skills", "agora-adlc", "conductor"}
+CORE_AI_SDLC_SKILLS = {
     "spec",
-    "pr-review",
-    "preflight",
+    "pm",
+    "spec-split",
     "wayfinder",
-    "adlc-amend",
-    "adlc-audit",
-    "adlc-clarify",
+    "pr-review",
+    "pr-ready",
+    "preflight",
+    "adversary",
+    "adlc-plan",
     "adlc-constitution",
-    "adlc-critique",
+    "adlc-clarify",
+    "adlc-amend",
     "adlc-explore",
     "adlc-init",
-    "adlc-plan",
-    "adlc-release",
-    "adlc-run",
     "adlc-test",
     "adlc-verify",
-    "conductor-implement",
-    "conductor-new-track",
-    "conductor-revert",
+    "adlc-critique",
+    "adlc-run",
+    "adlc-audit",
     "conductor-setup",
+    "conductor-new-track",
+    "conductor-implement",
     "conductor-status",
+    "conductor-review",
     "conductor-switch",
-    "adversary",
+    "conductor-revert",
     "critic",
     "reviewer",
     "planner",
+    "tester",
 }
 
 
@@ -169,7 +121,7 @@ def set_config_value(key: str, value: Any) -> Dict[str, Any]:
 
 def resolve_library_path(custom_path: Optional[str] = None) -> str:
     """
-    Resolve the active Quartermaster library path with priority:
+    Resolve the active Quartermaster library path:
     1. CLI argument (--library)
     2. Configured 'skills-library' setting
     3. Default location (~/.gemini/skills-library)
@@ -186,18 +138,17 @@ def resolve_library_path(custom_path: Optional[str] = None) -> str:
         if os.path.exists(expanded):
             return expanded
 
-    expanded_default = os.path.abspath(DEFAULT_LIBRARY_PATH)
-    return expanded_default
+    return os.path.abspath(DEFAULT_LIBRARY_PATH)
 
 
 def interactive_config() -> None:
     """Interactive command-line configuration session."""
     cfg = load_config()
     print("=" * 80)
-    print("  QUARTERMASTER INTERACTIVE SETTINGS CONFIGURATION")
+    print("  QUARTERMASTER SETTINGS")
     print("=" * 80)
-    print(f"Current Config File: {get_active_config_file()}")
-    print("\nActive Settings:")
+    print(f"Active Config File: {get_active_config_file()}")
+    print("\nSettings:")
     for k, v in sorted(cfg.items()):
         print(f"  * {k:<20} = {v}")
 
@@ -233,9 +184,9 @@ def interactive_config() -> None:
 # Frontmatter & Manifest Parsing
 # ==============================================================================
 
-def parse_skill_frontmatter(content: str) -> Dict[str, str]:
+def parse_skill_frontmatter(content: str) -> Dict[str, Any]:
     """Parse YAML frontmatter from a SKILL.md document without external YAML dependencies."""
-    meta: Dict[str, str] = {}
+    meta: Dict[str, Any] = {}
     match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
     if not match:
         return meta
@@ -248,6 +199,11 @@ def parse_skill_frontmatter(content: str) -> Dict[str, str]:
     ver_m = re.search(r"^version:\s*(.*)$", fm, re.MULTILINE)
     if ver_m:
         meta["version"] = ver_m.group(1).strip().strip("\"'")
+
+    # Parse tags
+    tags_m = re.search(r"^tags:\s*\[(.*?)\]", fm, re.MULTILINE)
+    if tags_m:
+        meta["tags"] = [t.strip().strip("\"'") for t in tags_m.group(1).split(",") if t.strip()]
 
     lines = fm.split("\n")
     desc_lines: List[str] = []
@@ -290,55 +246,41 @@ def parse_plugin_manifest(plugin_json_path: str) -> Dict[str, Any]:
 
 
 # ==============================================================================
-# Armory Cataloging (Skills & Plugins with Capability Classification)
+# Armory Cataloging (Natural Package & Plugin Discovery)
 # ==============================================================================
 
 def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Discovers all packages, plugins, and skills in the configured skills-library.
-    Categorizes into 7 functional domains and tags with capability_type
-    ('general_ai_sdlc' vs 'domain_specific').
+    Groups naturally by Package / Plugin on disk without artificial domain silos.
     """
     lib_dir = resolve_library_path(library_path)
     if not os.path.exists(lib_dir):
         return {
             "library_path": lib_dir,
             "error": f"Library path does not exist: {lib_dir}",
-            "total_skills": 0,
-            "total_plugins": 0,
             "total_packages": 0,
-            "categories": {},
+            "total_plugins": 0,
+            "total_skills": 0,
+            "packages": {},
             "plugins": [],
             "skills": [],
         }
 
-    pkg_to_cat = {}
-    for cat_def in CATEGORIES_DEF:
-        for pkg in cat_def["packages"]:
-            pkg_to_cat[pkg.lower()] = cat_def["name"]
-
-    # Discover top-level package directories
     package_dirs = [
         d for d in os.listdir(lib_dir)
         if os.path.isdir(os.path.join(lib_dir, d)) and not d.startswith(".")
     ]
 
+    packages_dict: Dict[str, Dict[str, Any]] = {}
     all_plugins: List[Dict[str, Any]] = []
     all_skills: List[Dict[str, Any]] = []
 
     for pkg in sorted(package_dirs):
         pkg_dir = os.path.join(lib_dir, pkg)
-        cat_name = pkg_to_cat.get(pkg.lower(), "Testing, Spec-Driven Development & ADLC")
 
-        # Check for plugin manifest (plugin.json)
         plugin_manifest_path = os.path.join(pkg_dir, "plugin.json")
         is_plugin = os.path.exists(plugin_manifest_path)
-
-        pkg_capability_type = (
-            "general_ai_sdlc"
-            if pkg.lower() in GENERAL_AI_SDLC_PACKAGES
-            else "domain_specific"
-        )
 
         plugin_info: Optional[Dict[str, Any]] = None
         if is_plugin:
@@ -359,11 +301,12 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             if os.path.exists(os.path.join(pkg_dir, "agents")):
                 components.append("agents")
 
+            p_tier = "core" if pkg.lower() in CORE_AI_SDLC_PACKAGES else "stack"
+
             plugin_info = {
                 "name": plugin_name,
                 "package": pkg,
-                "category": cat_name,
-                "capability_type": pkg_capability_type,
+                "tier": p_tier,
                 "version": plugin_version,
                 "description": plugin_desc,
                 "source_dir": pkg_dir,
@@ -374,6 +317,8 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 
         # Discover all SKILL.md files inside package
         skill_files = glob.glob(os.path.join(pkg_dir, "**", "SKILL.md"), recursive=True)
+        pkg_skills: List[Dict[str, Any]] = []
+
         for sf in sorted(skill_files):
             skill_dir = os.path.dirname(sf)
             try:
@@ -386,50 +331,37 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             name = meta.get("name") or os.path.basename(skill_dir)
             desc = meta.get("description") or "No description available."
             version = meta.get("version")
+            tags = meta.get("tags", [])
 
-            skill_capability_type = (
-                "general_ai_sdlc"
-                if (pkg_capability_type == "general_ai_sdlc" or name.lower() in GENERAL_AI_SDLC_SKILLS)
-                else "domain_specific"
-            )
+            s_tier = "core" if (name.lower() in CORE_AI_SDLC_SKILLS or pkg.lower() in CORE_AI_SDLC_PACKAGES) else "stack"
 
             subdirs = [
                 d for d in os.listdir(skill_dir)
                 if os.path.isdir(os.path.join(skill_dir, d))
             ]
 
-            all_skills.append({
+            skill_entry = {
                 "name": name,
                 "dir_name": os.path.basename(skill_dir),
                 "package": pkg,
-                "category": cat_name,
-                "capability_type": skill_capability_type,
+                "tier": s_tier,
+                "tags": tags,
                 "source_dir": skill_dir,
                 "skill_file": sf,
                 "description": desc,
                 "version": version,
                 "subdirs": subdirs,
                 "parent_plugin": plugin_info["name"] if plugin_info else None,
-            })
+            }
+            pkg_skills.append(skill_entry)
+            all_skills.append(skill_entry)
 
-    # Group by category
-    categories_dict: Dict[str, Dict[str, Any]] = {}
-    for cat_def in CATEGORIES_DEF:
-        cat_name = cat_def["name"]
-        cat_skills = [s for s in all_skills if s["category"] == cat_name]
-        cat_plugins = [p for p in all_plugins if p["category"] == cat_name]
-
-        pkgs_dict: Dict[str, List[Dict[str, Any]]] = {}
-        for s in cat_skills:
-            pkgs_dict.setdefault(s["package"], []).append(s)
-
-        categories_dict[cat_name] = {
-            "display_name": cat_def["display_name"],
-            "description": cat_def["description"],
-            "packages": pkgs_dict,
-            "plugins": cat_plugins,
-            "plugin_count": len(cat_plugins),
-            "skill_count": len(cat_skills),
+        packages_dict[pkg] = {
+            "name": pkg,
+            "is_plugin": is_plugin,
+            "plugin_info": plugin_info,
+            "skills": pkg_skills,
+            "skill_count": len(pkg_skills),
         }
 
     return {
@@ -437,21 +369,21 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
         "total_packages": len(package_dirs),
         "total_plugins": len(all_plugins),
         "total_skills": len(all_skills),
-        "categories": categories_dict,
+        "packages": packages_dict,
         "plugins": all_plugins,
         "skills": all_skills,
     }
 
 
 # ==============================================================================
-# Workspace Reconnaissance & Stack Detection
+# Workspace Reconnaissance & Stack Matching
 # ==============================================================================
 
 def detect_stack(project_path: str) -> Dict[str, Any]:
     """
-    Scans project root and key subdirectories for manifest files.
-    Identifies frameworks, detects brand new / uninitialized projects,
-    and returns tailored recommendations separated by capability type.
+    Scans project root and subdirectories for manifest files.
+    Identifies frameworks, detects uninitialized projects,
+    and returns tailored recommendations without hardcoded domain silos.
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     if not os.path.exists(proj_dir):
@@ -472,40 +404,25 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
     seen_skill_names: Set[str] = set()
     seen_plugin_names: Set[str] = set()
 
-    def add_skill_rec(
-        name: str,
-        package: str,
-        category: str,
-        capability_type: str,
-        reason: str,
-        priority: str = "High",
-    ):
+    def add_skill_rec(name: str, package: str, tier: str, reason: str, priority: str = "High"):
         norm = name.lower().replace("_", "-")
         if norm not in seen_skill_names:
             seen_skill_names.add(norm)
             recommended_skills.append({
                 "name": name,
                 "package": package,
-                "category": category,
-                "capability_type": capability_type,
+                "tier": tier,
                 "reason": reason,
                 "priority": priority,
             })
 
-    def add_plugin_rec(
-        name: str,
-        category: str,
-        capability_type: str,
-        reason: str,
-        priority: str = "High",
-    ):
+    def add_plugin_rec(name: str, tier: str, reason: str, priority: str = "High"):
         norm = name.lower().replace("_", "-")
         if norm not in seen_plugin_names:
             seen_plugin_names.add(norm)
             recommended_plugins.append({
                 "name": name,
-                "category": category,
-                "capability_type": capability_type,
+                "tier": tier,
                 "reason": reason,
                 "priority": priority,
             })
@@ -517,7 +434,7 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
         except Exception:
             return ""
 
-    # Check for Flutter / Dart (pubspec.yaml)
+    # Flutter / Dart (pubspec.yaml)
     pubspec_path = os.path.join(proj_dir, "pubspec.yaml")
     if os.path.exists(pubspec_path):
         manifests_found.append("pubspec.yaml")
@@ -532,67 +449,19 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "details": ", ".join(tech_details),
         })
 
-        add_plugin_rec(
-            "flutter",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Complete Flutter plugin with architecture, layout, and testing tooling",
-        )
-        add_skill_rec(
-            "flutter-apply-architecture-best-practices",
-            "flutter",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Essential architecture & structure standards for Flutter apps",
-        )
-        add_skill_rec(
-            "dart-add-unit-test",
-            "flutter",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Best practices for test doubles, fixtures, and assertions",
-        )
-        add_skill_rec(
-            "flutter-build-responsive-layout",
-            "flutter",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Responsive layout patterns across screen sizes and orientations",
-        )
-        add_skill_rec(
-            "dart-run-static-analysis",
-            "flutter",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Linter rule enforcement and static analysis diagnostics",
-        )
+        add_plugin_rec("flutter", "stack", "Flutter architecture, responsive layouts, and Dart unit testing")
+        add_skill_rec("flutter-apply-architecture-best-practices", "flutter", "stack", "Architecture and structure standards for Flutter")
+        add_skill_rec("dart-add-unit-test", "flutter", "core", "Unit test doubles, fixtures, and assertions for Dart")
+        add_skill_rec("flutter-build-responsive-layout", "flutter", "stack", "Responsive layout patterns across devices")
 
         if "http:" in content or "dio:" in content:
-            add_skill_rec(
-                "flutter-use-http-package",
-                "flutter",
-                "Mobile & Multiplatform",
-                "domain_specific",
-                "Detected HTTP networking dependencies",
-            )
+            add_skill_rec("flutter-use-http-package", "flutter", "stack", "HTTP networking patterns")
         if "json_annotation:" in content or "json_serializable:" in content:
-            add_skill_rec(
-                "flutter-implement-json-serialization",
-                "flutter",
-                "Mobile & Multiplatform",
-                "domain_specific",
-                "Detected JSON code generation annotations",
-            )
+            add_skill_rec("flutter-implement-json-serialization", "flutter", "stack", "JSON code generation and serialization")
         if "go_router:" in content or "auto_route:" in content:
-            add_skill_rec(
-                "flutter-setup-declarative-routing",
-                "flutter",
-                "Mobile & Multiplatform",
-                "domain_specific",
-                "Detected declarative router dependencies",
-            )
+            add_skill_rec("flutter-setup-declarative-routing", "flutter", "stack", "Declarative routing patterns")
 
-    # Check for Android Native Project
+    # Android Native
     android_dir = os.path.join(proj_dir, "android")
     has_gradle = (
         os.path.exists(os.path.join(proj_dir, "build.gradle"))
@@ -607,39 +476,27 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "manifest": manifest_name,
             "details": "Android Gradle build system and device tools",
         })
-        add_plugin_rec(
-            "android-cli-plugin",
-            "Mobile & Multiplatform",
-            "domain_specific",
-            "Android CLI management, emulators, logcat, and APK builds",
-        )
+        add_plugin_rec("android-cli-plugin", "stack", "Android CLI management, emulators, logcat, and APK builds")
 
-    # Check for Node.js / Web / TypeScript (package.json)
+    # Node.js / Web / TypeScript (package.json)
     package_json_path = os.path.join(proj_dir, "package.json")
     if os.path.exists(package_json_path):
         manifests_found.append("package.json")
         content = safe_read(package_json_path)
         frameworks = []
-        is_frontend = False
 
         if "react" in content:
             frameworks.append("React")
-            is_frontend = True
         if "next" in content:
             frameworks.append("Next.js")
-            is_frontend = True
         if "vue" in content:
             frameworks.append("Vue")
-            is_frontend = True
         if "svelte" in content:
             frameworks.append("Svelte")
-            is_frontend = True
         if "tailwind" in content or os.path.exists(os.path.join(proj_dir, "tailwind.config.js")):
             frameworks.append("Tailwind CSS")
-            is_frontend = True
         if "vite" in content:
             frameworks.append("Vite")
-            is_frontend = True
         if "express" in content:
             frameworks.append("Express")
         if "fastify" in content:
@@ -654,27 +511,11 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "details": details_str,
         })
 
-        add_skill_rec(
-            "impeccable",
-            "impeccable",
-            "Web, Frontend & Design",
-            "domain_specific",
-            "Elite frontend craft, design polish, UX audit, and component refinement",
-        )
-        add_plugin_rec(
-            "modern-web-guidance-plugin",
-            "Web, Frontend & Design",
-            "domain_specific",
-            "Architectural standards, clean idioms, and web performance patterns",
-        )
-        add_plugin_rec(
-            "chrome-devtools-plugin",
-            "Web, Frontend & Design",
-            "domain_specific",
-            "DevTools MCP inspection, runtime debugging, and DOM inspection",
-        )
+        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
+        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
+        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
 
-    # Check for Chrome Extension (manifest.json)
+    # Chrome Extension (manifest.json)
     manifest_json_path = os.path.join(proj_dir, "manifest.json")
     if os.path.exists(manifest_json_path):
         content = safe_read(manifest_json_path)
@@ -685,21 +526,10 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
                 "manifest": "manifest.json",
                 "details": "Chrome Extension manifest (v2/v3)",
             })
-            add_skill_rec(
-                "chrome-extensions",
-                "modern-web-guidance-plugin",
-                "Web, Frontend & Design",
-                "domain_specific",
-                "Chrome extension architecture, permissions, and background workers",
-            )
-            add_plugin_rec(
-                "chrome-devtools-plugin",
-                "Web, Frontend & Design",
-                "domain_specific",
-                "Inspection of extension popups, options pages, and content scripts",
-            )
+            add_skill_rec("chrome-extensions", "modern-web-guidance-plugin", "stack", "Chrome extension architecture, permissions, and background workers")
+            add_plugin_rec("chrome-devtools-plugin", "stack", "DevTools inspection of popups and content scripts")
 
-    # Check for Firebase (firebase.json, .firebaserc)
+    # Firebase (firebase.json, .firebaserc)
     firebase_json_path = os.path.join(proj_dir, "firebase.json")
     firebaserc_path = os.path.join(proj_dir, ".firebaserc")
     if os.path.exists(firebase_json_path) or os.path.exists(firebaserc_path):
@@ -710,42 +540,19 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "manifest": manifest_name,
             "details": "Cloud Firestore, Auth, Hosting, and Security Rules",
         })
-        add_plugin_rec(
-            "firebase",
-            "Cloud & Backend",
-            "domain_specific",
-            "Complete Firebase ecosystem plugin (Firestore, Auth, Rules, App Hosting)",
-        )
-        add_skill_rec(
-            "firebase-basics",
-            "firebase",
-            "Cloud & Backend",
-            "domain_specific",
-            "Foundational Firebase CLI, project initialization, and emulator suite",
-        )
-        add_skill_rec(
-            "firebase-firestore",
-            "firebase",
-            "Cloud & Backend",
-            "domain_specific",
-            "Firestore schema design, querying, and transactional operations",
-        )
-        add_skill_rec(
-            "firebase-security-rules-auditor",
-            "firebase",
-            "Cloud & Backend",
-            "domain_specific",
-            "Audit and hardening of Firestore & Cloud Storage security rules",
-        )
+        add_plugin_rec("firebase", "stack", "Firebase Firestore, Auth, Hosting, and Security Rules")
+        add_skill_rec("firebase-basics", "firebase", "stack", "Firebase CLI, project initialization, and emulator suite")
+        add_skill_rec("firebase-firestore", "firebase", "stack", "Firestore schema design, querying, and transactions")
+        add_skill_rec("firebase-security-rules-auditor", "firebase", "core", "Audit and hardening of Firestore & Cloud Storage security rules")
 
-    # Check for Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
-    pyproject_path = os.path.join(proj_dir, "pyproject.toml")
-    requirements_path = os.path.join(proj_dir, "requirements.txt")
-    pipfile_path = os.path.join(proj_dir, "Pipfile")
-    setup_path = os.path.join(proj_dir, "setup.py")
-
+    # Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
     py_manifests = [
-        m for m in [pyproject_path, requirements_path, pipfile_path, setup_path]
+        m for m in [
+            os.path.join(proj_dir, "pyproject.toml"),
+            os.path.join(proj_dir, "requirements.txt"),
+            os.path.join(proj_dir, "Pipfile"),
+            os.path.join(proj_dir, "setup.py"),
+        ]
         if os.path.exists(m)
     ]
     if py_manifests:
@@ -767,55 +574,12 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "details": ", ".join(py_details),
         })
 
-        add_skill_rec(
-            "uv",
-            "science",
-            "Science & Bio-Informatics",
-            "domain_specific",
-            "Ultra-fast Python package management and virtual environments via uv",
-        )
+        add_skill_rec("uv", "science", "stack", "Ultra-fast Python package management and virtual environments via uv")
 
         if any(kw in combined_py for kw in ["antigravity", "google-genai", "gemini"]) or os.path.exists(os.path.join(proj_dir, "agents")):
-            add_plugin_rec(
-                "google-antigravity-sdk",
-                "AI Agent Development",
-                "domain_specific",
-                "Antigravity SDK for multi-agent workflows, subagents, and tool execution",
-            )
+            add_plugin_rec("google-antigravity-sdk", "stack", "Antigravity SDK for multi-agent workflows, subagents, and tool execution")
 
-        bio_keywords = ["biopython", "scanpy", "rdkit", "anndata", "pytorch", "torch", "scipy", "numpy", "alphafold", "bioinfor"]
-        if any(kw in combined_py for kw in bio_keywords):
-            technologies.append({
-                "name": "Scientific / Bio-Informatics",
-                "manifest": primary_py,
-                "details": "Scientific and computational biology libraries detected",
-            })
-            add_plugin_rec(
-                "science",
-                "Science & Bio-Informatics",
-                "domain_specific",
-                "Biomedical databases (PubMed, arXiv, NCBI, UniProt) and AlphaFold",
-            )
-
-    # Check for Rust (Cargo.toml)
-    if os.path.exists(os.path.join(proj_dir, "Cargo.toml")):
-        manifests_found.append("Cargo.toml")
-        technologies.append({
-            "name": "Rust Ecosystem",
-            "manifest": "Cargo.toml",
-            "details": "Cargo build system and crates",
-        })
-
-    # Check for Go (go.mod)
-    if os.path.exists(os.path.join(proj_dir, "go.mod")):
-        manifests_found.append("go.mod")
-        technologies.append({
-            "name": "Go Platform",
-            "manifest": "go.mod",
-            "details": "Go modules dependency management",
-        })
-
-    # Check for Containers (Dockerfile, docker-compose)
+    # Containers / Docker
     if os.path.exists(os.path.join(proj_dir, "Dockerfile")) or os.path.exists(os.path.join(proj_dir, "docker-compose.yml")):
         doc_manifest = "Dockerfile" if os.path.exists(os.path.join(proj_dir, "Dockerfile")) else "docker-compose.yml"
         manifests_found.append(doc_manifest)
@@ -824,43 +588,14 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             "manifest": doc_manifest,
             "details": "Container build specifications and multi-service definitions",
         })
+        add_plugin_rec("cloudrun", "stack", "Serverless container deployment and traffic routing")
 
-    # Universal High-Confidence Baseline: General AI-SDLC Skills
-    # Universal guardrails that elevate software engineering regardless of technology
-    add_skill_rec(
-        "spec",
-        "spark-skills",
-        "Testing, Spec-Driven Development & ADLC",
-        "general_ai_sdlc",
-        "Spec-driven engineering: write clear functional specs before writing code",
-        priority="Baseline",
-    )
-    add_skill_rec(
-        "pr-review",
-        "spark-skills",
-        "Testing, Spec-Driven Development & ADLC",
-        "general_ai_sdlc",
-        "Adversarial pull request critique, bug detection, and regression guard",
-        priority="Baseline",
-    )
-    add_skill_rec(
-        "preflight",
-        "spark-skills",
-        "Testing, Spec-Driven Development & ADLC",
-        "general_ai_sdlc",
-        "Pre-commit sanity verification, lint checks, and test runner assurance",
-        priority="Baseline",
-    )
-    add_skill_rec(
-        "wayfinder",
-        "spark-skills",
-        "Testing, Spec-Driven Development & ADLC",
-        "general_ai_sdlc",
-        "Deep codebase navigation, dependency mapping, and orientation",
-        priority="Baseline",
-    )
+    # Universal Core AI-SDLC Baseline (Equipped for any repository)
+    add_skill_rec("spec", "spark-skills", "core", "Spec-driven engineering: write clear functional specs before writing code", priority="Baseline")
+    add_skill_rec("pr-review", "spark-skills", "core", "Adversarial pull request critique, bug detection, and regression guard", priority="Baseline")
+    add_skill_rec("preflight", "spark-skills", "core", "Pre-commit sanity verification, lint checks, and test runner assurance", priority="Baseline")
+    add_skill_rec("wayfinder", "spark-skills", "core", "Deep codebase navigation, dependency mapping, and orientation", priority="Baseline")
 
-    # Detect if brand-new or uninitialized project
     is_brand_new = False
     if not manifests_found:
         entries = [
@@ -875,19 +610,19 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
     scoping_dialogue = None
     if is_brand_new:
         scoping_dialogue = {
-            "prompt": "This workspace appears to be a brand new project. What type of project are you building?",
+            "prompt": "This workspace appears to be a brand-new project. What type of project are you building?",
             "options": [
-                {"label": "Web / Frontend App", "category": "Web, Frontend & Design"},
-                {"label": "Mobile App (Flutter / Android)", "category": "Mobile & Multiplatform"},
-                {"label": "Cloud & Backend API / Microservices", "category": "Cloud & Backend"},
-                {"label": "AI Agent / Multi-Agent System", "category": "AI Agent Development"},
-                {"label": "Data Science / Scientific Computing", "category": "Science & Bio-Informatics"},
-                {"label": "I'm not sure yet", "category": "General AI-SDLC Only"},
+                {"label": "Web or Frontend Application", "match": "web"},
+                {"label": "Mobile or Multiplatform Application", "match": "mobile"},
+                {"label": "Backend API, Cloud or Database Service", "match": "backend"},
+                {"label": "AI Agent or Machine Learning System", "match": "ai"},
+                {"label": "DevOps, Infrastructure or Tooling", "match": "devops"},
+                {"label": "I'm not sure yet", "match": "core_only"},
             ],
             "recommendation_on_unclear": (
-                "When scope is unclear or 'I\\'m not sure yet' is chosen, Quartermaster equips "
-                "only General AI-SDLC skills (e.g. adversarial review, spec-driven engineering, "
-                "preflight verification), keeping the project uncluttered until domain decisions emerge."
+                "When scope is undecided or 'I\\'m not sure yet' is chosen, Quartermaster equips "
+                "only universal Core AI-SDLC guardrails (spec-driven design, adversarial PR review, preflight checks), "
+                "keeping your workspace lean until framework choices emerge."
             )
         }
 
@@ -911,13 +646,12 @@ def provision_assets(
     project_path: str,
     asset_names: List[str],
     library_path: Optional[str] = None,
-    force_type: Optional[str] = None,  # "skill" or "plugin" or None (auto)
+    force_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Provisions requested assets into `<project_path>/.agents/`.
     - Full plugins &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
     - Standalone skills &rarr; `<project_path>/.agents/skills/<skill_name>/`
-    Maintains self-contained copies with no global side effects.
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     os.makedirs(proj_dir, exist_ok=True)
@@ -929,7 +663,6 @@ def provision_assets(
     all_skills = catalog.get("skills", [])
     all_plugins = catalog.get("plugins", [])
 
-    # Index plugins by normalized name
     plugin_map: Dict[str, Dict[str, Any]] = {}
     for p in all_plugins:
         p_name = p["name"].lower()
@@ -938,7 +671,6 @@ def provision_assets(
         plugin_map[p_name.replace("_", "-")] = p
         plugin_map[p["package"].lower()] = p
 
-    # Index skills by normalized name
     skill_map: Dict[str, Dict[str, Any]] = {}
     skill_by_pkg: Dict[str, List[Dict[str, Any]]] = {}
     for s in all_skills:
@@ -964,7 +696,6 @@ def provision_assets(
         req_norm = req.lower().strip()
         handled = False
 
-        # If user explicitly asked for plugin or asset is in plugin map
         is_plugin_match = (req_norm in plugin_map) if force_type != "skill" else False
         is_skill_match = (req_norm in skill_map) if force_type != "plugin" else False
 
@@ -985,8 +716,7 @@ def provision_assets(
                     "name": canonical_name,
                     "type": "plugin",
                     "package": plugin["package"],
-                    "category": plugin["category"],
-                    "capability_type": plugin["capability_type"],
+                    "tier": plugin["tier"],
                     "source": src_dir,
                     "destination": dest_dir,
                     "files_copied": file_count,
@@ -1011,8 +741,7 @@ def provision_assets(
                     "name": canonical_name,
                     "type": "skill",
                     "package": skill["package"],
-                    "category": skill["category"],
-                    "capability_type": skill["capability_type"],
+                    "tier": skill["tier"],
                     "source": src_dir,
                     "destination": dest_dir,
                     "files_copied": file_count,
@@ -1020,7 +749,7 @@ def provision_assets(
                 })
             handled = True
 
-        # Route 3: Package name expansion (if not a plugin, expand to all contained skills)
+        # Route 3: Package name expansion
         elif req_norm in skill_by_pkg:
             for skill in skill_by_pkg[req_norm]:
                 canonical_name = skill["name"]
@@ -1035,8 +764,7 @@ def provision_assets(
                         "name": canonical_name,
                         "type": "skill",
                         "package": skill["package"],
-                        "category": skill["category"],
-                        "capability_type": skill["capability_type"],
+                        "tier": skill["tier"],
                         "source": src_dir,
                         "destination": dest_dir,
                         "files_copied": file_count,
@@ -1066,13 +794,11 @@ def sweep_project(
     additions_only: bool = False,
 ) -> Dict[str, Any]:
     """
-    Performs a thorough sweep of the project:
-    1. Audits current workspace tech stack and manifests.
-    2. Audits installed skills & plugins in `<project>/.agents/`.
-    3. Cross-references the armory library:
-       - Identifies newly matching skills/plugins to add.
-       - If additions_only is False: identifies installed skills whose underlying tech was removed (pruning candidates).
-       - If additions_only is True (background mode): pruning candidates are suppressed.
+    Audits the current workspace:
+    1. Checks active inventory in `.agents/`.
+    2. Re-scans manifests and dependencies.
+    3. Cross-references armory for newly relevant additions.
+    4. If not additions_only, highlights unneeded stack tools.
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     scan = detect_stack(proj_dir)
@@ -1081,7 +807,6 @@ def sweep_project(
     target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
     target_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
 
-    # Audit installed skills
     installed_skills: List[Dict[str, Any]] = []
     if os.path.exists(target_skills_dir):
         for s_name in sorted(os.listdir(target_skills_dir)):
@@ -1093,7 +818,6 @@ def sweep_project(
                     "type": "skill",
                 })
 
-    # Audit installed plugins
     installed_plugins: List[Dict[str, Any]] = []
     if os.path.exists(target_plugins_dir):
         for p_name in sorted(os.listdir(target_plugins_dir)):
@@ -1108,7 +832,6 @@ def sweep_project(
     installed_skill_names = {s["name"].lower() for s in installed_skills}
     installed_plugin_names = {p["name"].lower() for p in installed_plugins}
 
-    # Evaluate recommended additions (skills/plugins recommended by scan that are NOT yet installed)
     additions: List[Dict[str, Any]] = []
 
     for rec_plugin in scan.get("recommended_plugins", []):
@@ -1117,64 +840,55 @@ def sweep_project(
             additions.append({
                 "name": rec_plugin["name"],
                 "type": "plugin",
-                "category": rec_plugin["category"],
-                "capability_type": rec_plugin.get("capability_type", "domain_specific"),
+                "tier": rec_plugin.get("tier", "stack"),
                 "reason": rec_plugin["reason"],
                 "priority": rec_plugin.get("priority", "High"),
             })
 
     for rec_skill in scan.get("recommended_skills", []):
         s_name = rec_skill["name"].lower()
-        # Only add if neither the skill nor its parent plugin is installed
         parent_pkg = rec_skill.get("package", "").lower()
         if s_name not in installed_skill_names and parent_pkg not in installed_plugin_names:
             additions.append({
                 "name": rec_skill["name"],
                 "type": "skill",
-                "category": rec_skill["category"],
-                "capability_type": rec_skill.get("capability_type", "domain_specific"),
+                "tier": rec_skill.get("tier", "stack"),
                 "reason": rec_skill["reason"],
                 "priority": rec_skill.get("priority", "High"),
             })
 
-    # Evaluate pruning candidates (only if additions_only is False)
     pruning_candidates: List[Dict[str, Any]] = []
     if not additions_only:
         manifest_list = scan.get("manifests_found", [])
-
-        # Check installed skills for relevance
         catalog_skills_by_name = {s["name"].lower(): s for s in catalog.get("skills", [])}
+
         for s in installed_skills:
             s_name = s["name"].lower()
             cat_entry = catalog_skills_by_name.get(s_name)
             if not cat_entry:
                 continue
 
-            # General AI-SDLC skills are never pruning candidates
-            if cat_entry.get("capability_type") == "general_ai_sdlc":
+            if cat_entry.get("tier") == "core":
                 continue
 
             pkg = cat_entry.get("package", "").lower()
-            # If Flutter skill but no pubspec
             if "flutter" in pkg and "pubspec.yaml" not in manifest_list:
                 pruning_candidates.append({
                     "name": s["name"],
                     "type": "skill",
-                    "reason": "Installed Flutter skill but no pubspec.yaml found in workspace",
+                    "reason": "Flutter skill installed but no pubspec.yaml found in workspace",
                 })
-            # If Firebase skill but no firebase.json
             elif "firebase" in pkg and not any("firebase" in m for m in manifest_list):
                 pruning_candidates.append({
                     "name": s["name"],
                     "type": "skill",
-                    "reason": "Installed Firebase skill but no firebase.json / .firebaserc found in workspace",
+                    "reason": "Firebase skill installed but no firebase.json / .firebaserc found in workspace",
                 })
-            # If Android CLI but no Gradle/android
             elif "android" in pkg and not any("android" in m or "gradle" in m for m in manifest_list):
                 pruning_candidates.append({
                     "name": s["name"],
                     "type": "skill",
-                    "reason": "Installed Android CLI tool but no Android/Gradle manifests found",
+                    "reason": "Android CLI tool installed but no Android/Gradle manifests found",
                 })
 
     return {
@@ -1196,7 +910,7 @@ def sweep_project(
 # ==============================================================================
 
 def format_catalog_text(catalog: Dict[str, Any]) -> str:
-    """Formats the catalog into an organized armory overview."""
+    """Formats the catalog grouping naturally by package and plugin."""
     lines: List[str] = []
     lines.append("=" * 80)
     lines.append("  QUARTERMASTER ARMORY CATALOG")
@@ -1208,38 +922,31 @@ def format_catalog_text(catalog: Dict[str, Any]) -> str:
     )
     lines.append("=" * 80)
 
-    cat_index = 1
-    categories = catalog.get("categories", {})
-    for cat_name, cat_data in categories.items():
+    packages = catalog.get("packages", {})
+    for pkg_name, pkg_data in packages.items():
+        is_plugin = pkg_data.get("is_plugin", False)
+        skills = pkg_data.get("skills", [])
+        p_badge = "[PLUGIN]" if is_plugin else "[PACKAGE]"
+
         lines.append("")
-        lines.append(
-            f"[{cat_index}] {cat_data.get('display_name')} "
-            f"({cat_data.get('plugin_count')} plugins, {cat_data.get('skill_count')} skills)"
-        )
-        lines.append(f"    {cat_data.get('description')}")
-        lines.append("    " + "-" * 72)
+        lines.append(f"{p_badge} {pkg_name} ({len(skills)} skills)")
+        if is_plugin and pkg_data.get("plugin_info"):
+            desc = pkg_data["plugin_info"].get("description", "")
+            if desc:
+                lines.append(f"  Description: {desc}")
+            comps = pkg_data["plugin_info"].get("components", [])
+            if comps:
+                lines.append(f"  Contains: {', '.join(comps)}")
 
-        plugins = cat_data.get("plugins", [])
-        if plugins:
-            lines.append("    [Full Plugins]")
-            for p in plugins:
-                comp_str = ", ".join(p.get("components", []))
-                lines.append(f"      * [PLUGIN] {p['name']:<30} (contains: {comp_str})")
-                lines.append(f"        {p['description']}")
-            lines.append("")
+        lines.append("  " + "-" * 70)
+        for s in skills:
+            name = s["name"]
+            desc = s["description"]
+            short_desc = desc if len(desc) <= 65 else desc[:62] + "..."
+            tier_badge = f"<{s.get('tier', 'stack')}>"
+            lines.append(f"    * {name:<35} {tier_badge:<8} : {short_desc}")
 
-        packages = cat_data.get("packages", {})
-        for pkg_name, skills in packages.items():
-            lines.append(f"    Package: {pkg_name} ({len(skills)} skills)")
-            for s in skills:
-                name = s["name"]
-                desc = s["description"]
-                short_desc = desc if len(desc) <= 65 else desc[:62] + "..."
-                tier = f"[{s.get('capability_type', 'domain_specific')}]"
-                lines.append(f"      * {name:<35} {tier:<20} : {short_desc}")
-            lines.append("")
-        cat_index += 1
-
+    lines.append("")
     lines.append("=" * 80)
     lines.append("To provision, run:")
     lines.append("  python3 quartermaster.py --provision <path> --skills <skill1,skill2,...>")
@@ -1249,7 +956,7 @@ def format_catalog_text(catalog: Dict[str, Any]) -> str:
 
 
 def format_scan_text(scan: Dict[str, Any]) -> str:
-    """Formats project scan results into a reconnaissance report."""
+    """Formats project scan results into a clean reconnaissance report."""
     lines: List[str] = []
     lines.append("=" * 80)
     lines.append("  QUARTERMASTER RECONNAISSANCE REPORT")
@@ -1257,17 +964,15 @@ def format_scan_text(scan: Dict[str, Any]) -> str:
     lines.append(f"  Status: {scan.get('status')}")
     lines.append("=" * 80)
 
-    # Scoping Dialogue Notice for brand new projects
     if scan.get("is_brand_new"):
-        lines.append("\n>>> BRAND NEW / UNINITIALIZED PROJECT DETECTED <<<")
+        lines.append("\n>>> BRAND-NEW / UNINITIALIZED PROJECT DETECTED <<<")
         dialogue = scan.get("scoping_dialogue", {})
         lines.append(f"Question: {dialogue.get('prompt')}")
         lines.append("Options:")
         for opt in dialogue.get("options", []):
-            lines.append(f"  [ ] {opt['label']:<32} -> {opt['category']}")
+            lines.append(f"  [ ] {opt['label']}")
         lines.append(f"\nGuiding Policy:\n  {dialogue.get('recommendation_on_unclear')}")
 
-    # Manifests
     manifests = scan.get("manifests_found", [])
     if manifests:
         lines.append("\n[Detected Manifests]")
@@ -1275,41 +980,28 @@ def format_scan_text(scan: Dict[str, Any]) -> str:
             lines.append(f"  * {m}")
     else:
         lines.append("\n[Detected Manifests]")
-        lines.append("  (No standard project manifest files identified in root)")
+        lines.append("  (No standard project manifest files identified)")
 
-    # Technologies
     technologies = scan.get("technologies", [])
     if technologies:
         lines.append("\n[Identified Tech Stack & Frameworks]")
         for t in technologies:
             lines.append(f"  * {t['name']:<28} [{t['manifest']}] -> {t['details']}")
 
-    # Recommended Plugins
     plugins = scan.get("recommended_plugins", [])
     if plugins:
         lines.append(f"\n[Recommended Full Plugins ({len(plugins)})]")
         for p in plugins:
-            p_badge = f"[{p.get('priority', 'High')}]"
-            lines.append(f"  * [PLUGIN] {p['name']:<30} {p_badge:<10} ({p['category']})")
-            lines.append(f"    Rationale: {p['reason']}")
+            lines.append(f"  * [PLUGIN] {p['name']:<30} Rationale: {p['reason']}")
 
-    # Recommended Skills
     recs = scan.get("recommended_skills", [])
-    lines.append(f"\n[High-Confidence Recommended Skills ({len(recs)})]")
+    lines.append(f"\n[Recommended Skills ({len(recs)})]")
     if recs:
-        by_cat: Dict[str, List[Dict[str, Any]]] = {}
         for r in recs:
-            by_cat.setdefault(r["category"], []).append(r)
-
-        for cat, items in by_cat.items():
-            lines.append(f"\n  -- {cat} --")
-            for item in items:
-                p_badge = f"[{item.get('priority', 'High')}]"
-                tier_badge = f"<{item.get('capability_type', 'domain_specific')}>"
-                lines.append(
-                    f"    * {item['name']:<36} {p_badge:<10} {tier_badge:<18} (pkg: {item['package']})"
-                )
-                lines.append(f"      Rationale: {item['reason']}")
+            tier_badge = f"<{r.get('tier', 'stack')}>"
+            p_badge = f"[{r.get('priority', 'High')}]"
+            lines.append(f"  * [SKILL]  {r['name']:<35} {p_badge:<10} {tier_badge:<8} (pkg: {r['package']})")
+            lines.append(f"             Rationale: {r['reason']}")
 
     lines.append("\n" + "=" * 80)
     quick_items = [p["name"] for p in plugins] + [r["name"] for r in recs[:6]]
@@ -1362,7 +1054,6 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     lines.append(f"  Skills Library: {swp.get('library_path')}")
     lines.append("=" * 80)
 
-    # Installed inventory
     i_plugins = swp.get("installed_plugins", [])
     i_skills = swp.get("installed_skills", [])
     lines.append(f"\n[Active Workspace Inventory] ({len(i_plugins)} plugins, {len(i_skills)} skills)")
@@ -1373,19 +1064,17 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     if not i_plugins and not i_skills:
         lines.append("  (No skills or plugins currently provisioned in .agents/)")
 
-    # Additions
     additions = swp.get("additions_recommended", [])
     lines.append(f"\n[Recommended New Capabilities to Onboard ({len(additions)})]")
     if additions:
         for a in additions:
             t_badge = "[PLUGIN]" if a["type"] == "plugin" else "[SKILL] "
             p_badge = f"[{a.get('priority', 'High')}]"
-            lines.append(f"  * + {t_badge} {a['name']:<30} {p_badge:<10} ({a['category']})")
+            lines.append(f"  * + {t_badge} {a['name']:<30} {p_badge:<10}")
             lines.append(f"      Rationale: {a['reason']}")
     else:
         lines.append("  (All recommended capabilities for current stack are already provisioned)")
 
-    # Pruning candidates (if not additions_only)
     if not swp.get("additions_only_mode"):
         pruning = swp.get("pruning_candidates", [])
         lines.append(f"\n[Potential Pruning Candidates ({len(pruning)})]")
@@ -1485,7 +1174,6 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Settings Actions
     if args.config_get:
         val = get_config_value(args.config_get)
         if args.json:
@@ -1510,7 +1198,6 @@ def main() -> int:
             interactive_config()
         return 0
 
-    # If no action flag passed, show help
     if not args.catalog and args.scan is None and not args.provision and args.sweep is None:
         parser.print_help()
         return 0
@@ -1553,7 +1240,7 @@ def main() -> int:
             if args.skills:
                 items.extend([s.strip() for s in args.skills.split(",") if s.strip()])
                 if force_type == "plugin":
-                    force_type = None  # Mixed
+                    force_type = None
 
             if not items:
                 print(
