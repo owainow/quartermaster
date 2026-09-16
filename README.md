@@ -1,125 +1,134 @@
-# Quartermaster 🛡️📦
+# Quartermaster
 
-**Intelligent Project Onboarding, Armory Engine & Automated Skill Sweeper for Antigravity AI Agents**
-
-Quartermaster is the centralized provisioning engine for Antigravity (AGY) coding assistants. Instead of overloading agents with hundreds of global skills—which dilutes system prompts, inflates token overhead, and induces tool hallucination—Quartermaster inspects your active workspace, detects its technology stack, and provisions tailored, self-contained capabilities directly into your project's local `.agents/` directory.
-
-Quartermaster operates with **armory independence**: it does not ship with static skills inside the repository. Instead, it references a configurable external **skills library** (defaulting to `~/.gemini/skills-library`).
+A smart provisioning engine and armory for Antigravity coding agents.
 
 ---
 
-## Core Capabilities
+## Why Quartermaster?
 
-1. **External Armory Referencing & Settings**: Dynamically references your central skills library with interactive settings (`--config`, `--config-set skills-library <path>`).
-2. **Dual Provisioning (Plugins & Skills)**:
-   - **Full Plugins** &rarr; `<project_path>/.agents/plugins/<plugin_name>/` (preserving `plugin.json`, `rules/`, `skills/`, `hooks.json`, `mcp_config.json`, and `agents/`).
-   - **Standalone Skills** &rarr; `<project_path>/.agents/skills/<skill_name>/` (preserving `SKILL.md`, `scripts/`, `references/`, and `resources/`).
-3. **Semantic Capability Classification**:
-   - **General AI-SDLC**: Foundational engineering guardrails applicable to any project regardless of language (e.g. `pr-review`, `spec`, `preflight`, `wayfinder`, `adlc-*`).
-   - **Domain-Specific**: Technology-bound capabilities (e.g. Flutter architecture, Firebase rules, DevTools debugging, bioinformatics).
-4. **Brand-New Project Scoping Dialogue**:
-   - Detects uninitialized or empty workspaces (`unscoped_new_project`).
-   - Guides the user through a scoping conversation with a mandatory **"I'm not sure yet"** option.
-   - If scope is unclear, provisions *only* universal General AI-SDLC guardrails, keeping the workspace lean until frameworks are chosen.
-5. **Quartermaster Sweep (`--sweep`)**:
-   - Audits current workspace tech against installed `.agents/` inventory.
-   - Identifies newly relevant skills/plugins to onboard as your codebase evolves.
-   - Highlights pruning candidates if underlying frameworks were removed.
-6. **Scheduled Daily Background Sweeps (Zero Friction)**:
-   - Configurable recurring daily cron task (`0 9 * * *`).
-   - Runs with `--additions-only` to silently evaluate newly relevant tools without nagging or recommending skill removal.
-7. **Zero-Dependency Engine**: Built with pure Python 3 standard library modules—no pip installations required.
+If you have spent any time working with agentic coding assistants, you will have run into the skill bloat problem. The temptation early on is to install every interesting skill globally. Before long, your agent's system prompt is bloated with hundreds of lines of instructions it does not need for the task at hand. Token overhead climbs, prompt caching efficiency drops, and the model starts hallucinating tools or picking the wrong approach entirely.
+
+A Flutter mobile developer does not need bioinformatics sequence tools loaded into their context window. A Python data engineer does not need Android emulator CLI commands. 
+
+Quartermaster fixes this by flipping the model from global clutter to project-scoped isolation. It inspects your active workspace, figures out what technologies and frameworks you are actually using, and copies tailored, self-contained skills and plugins directly into your project's `.agents/` directory. 
+
+Your repository gets a clean, version-controlled set of tools that any agent working in that workspace can discover automatically, with zero global side effects.
 
 ---
 
-## Armory Catalog & The 7 Domains
+## Key Concepts
 
-Quartermaster categorizes capabilities across 7 functional domains:
+### 1. Library Independence
+Quartermaster does not ship with a static bundle of skills inside this repository. Instead, it acts as a lean engine that references an external skills library (defaulting to `~/.gemini/skills-library`). You can point it to your team's shared repository or a local directory using the built-in settings command.
 
-| # | Domain | Packages Included | Description |
-|---|--------|-------------------|-------------|
-| **1** | **Mobile & Multiplatform** | `flutter`, `android-cli-plugin` | Flutter architecture, layout, testing, serialization, and Android CLI / emulator tooling. |
-| **2** | **Web, Frontend & Design** | `chrome-devtools-plugin`, `modern-web-guidance-plugin`, `impeccable` | Craft UI/UX design, modern web architecture, responsive layouts, Chrome DevTools, and web performance. |
-| **3** | **Cloud & Backend** | `firebase`, `cloudrun` | Firebase Firestore, Auth, Hosting, App Hosting, Security Rules auditing, and serverless compute. |
-| **4** | **Testing, Spec-Driven Development & ADLC** | `spark-skills`, `agora-adlc`, `conductor` | Spec-driven engineering (`spec`), PR review guardrails (`pr-review`), pre-commit verification (`preflight`), Conductor tracks, and Agora ADLC loops. |
-| **5** | **Synthetic Data & Simulation** | `synthetikos` | Persona simulation (`customer`, `colleague`), corporate ledgers, multi-agent synthetic datasets, and verification. |
-| **6** | **Science & Bio-Informatics** | `science` | AlphaFold, PDB, PubMed, arXiv search, NCBI sequence retrieval, UniProt, ChEMBL, genomics, and `uv`. |
-| **7** | **AI Agent Development** | `google-antigravity-sdk` | Multi-agent workflows, Antigravity SDK tool building, agent orchestration, and evaluation. |
+### 2. Full Plugin and Skill Support
+Antigravity supports both standalone skills and full plugins. Quartermaster handles both:
+* **Standalone Skills** live in `<project>/.agents/skills/<skill-name>/` with their own `SKILL.md`, scripts, and reference docs.
+* **Full Plugins** live in `<project>/.agents/plugins/<plugin-name>/` and bundle multiple skills, rules (`AGENTS.md`), lifecycle hooks (`hooks.json`), and MCP server configurations into a single unit.
+
+### 3. General AI-SDLC vs Domain-Specific Tools
+Not all skills are created equal. Quartermaster classifies tools into two broad buckets:
+* **General AI-SDLC**: Foundational engineering guardrails that apply to almost any software project regardless of language. Think spec-driven development (`spec`), adversarial PR review (`pr-review`), pre-commit sanity checks (`preflight`), and codebase orientation (`wayfinder`).
+* **Domain-Specific**: Capabilities tied directly to a specific platform, framework, or runtime (Flutter architecture rules, Firebase security rules, Chrome DevTools debugging, PyTorch scientific tools).
+
+### 4. Brand-New Projects and "I'm not sure yet"
+When you run Quartermaster on a fresh, empty directory, there are no manifests (`package.json`, `pubspec.yaml`, etc.) to inspect. Rather than guessing or dumping random tools into your workspace, Quartermaster starts a quick scoping dialogue to ask what you are planning to build.
+
+Crucially, there is always an option for **"I'm not sure yet"**. If you are just prototyping or haven't settled on a tech stack, Quartermaster equips only the universal General AI-SDLC skills. You get quality guardrails from day one without premature framework baggage.
+
+### 5. Day-Two Operations: Sweeps and Scheduled Tasks
+Software projects evolve. You might start with a simple Node backend, add Firebase authentication three weeks later, and introduce Tailwind for a new admin dashboard. 
+
+Quartermaster includes a `sweep` command for ongoing audits:
+* **Manual Sweep (`--sweep`)**: Audits your active workspace inventory in `.agents/`, re-scans manifests, and recommends newly relevant skills from the library. In interactive mode, it can also flag skills whose underlying dependencies were removed.
+* **Scheduled Background Sweeps (`--additions-only`)**: Instead of intrusive lifecycle hooks that fire on every turn, Quartermaster can run as a daily scheduled task. In this mode, it runs quietly in the background and strictly looks for additions. It never nags you or recommends removing existing skills, ensuring zero friction.
 
 ---
 
-## Directory Structure
+## The 7 Armory Domains
 
-```
-/Users/owaino/quartermaster/
-├── scripts/
-│   └── quartermaster.py           # Core CLI, detection, settings & provisioning engine
-└── README.md                      # System documentation & usage guide
-```
+Quartermaster categorizes capabilities from your skills library across 7 functional domains:
 
-*Note: The central library of curated plugins and skills lives externally in `~/.gemini/skills-library`.*
+1. **Mobile & Multiplatform**: Flutter architecture, Dart testing, responsive layouts, and Android CLI / emulator tooling.
+2. **Web, Frontend & Design**: Modern web architecture, high-craft UI/UX (`impeccable`), Chrome DevTools inspection, and web performance.
+3. **Cloud & Backend**: Firebase (Firestore, Auth, Hosting, Rules auditing) and serverless compute (Cloud Run).
+4. **Testing, Spec-Driven Development & ADLC**: Spec-driven engineering (`spec`), PR review guardrails (`pr-review`), preflight verification, Conductor tracks, and Agora ADLC loops.
+5. **Synthetic Data & Simulation**: Persona simulations (`customer`, `colleague`), corporate ledgers, and multi-agent test datasets (`synthetikos`).
+6. **Science & Bio-Informatics**: Literature search (arXiv, PubMed), computational biology (AlphaFold, PDB, NCBI), genomics, and fast Python environments (`uv`).
+7. **AI Agent Development**: Multi-agent workflows, Antigravity SDK tool building, and orchestration.
 
 ---
 
-## CLI Usage
+## Setup & CLI Usage
 
-### 1. Interactive Settings & Library Configuration
+Quartermaster is built with pure Python 3 standard library modules. There are no pip dependencies to install.
+
+### 1. Configuring Your Skills Library
+By default, Quartermaster looks for your central armory at `~/.gemini/skills-library`. You can view or change this at any time:
+
 ```bash
-# Launch interactive settings menu
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config
+# Check current configuration
+python3 scripts/quartermaster.py --config-get skills-library
 
-# View the currently active skills-library path
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get skills-library
+# Point to a custom library path
+python3 scripts/quartermaster.py --config-set skills-library /path/to/my/skills-library
 
-# Change the skills-library path
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set skills-library /path/to/my-library
+# Or open the interactive settings menu
+python3 scripts/quartermaster.py --config
 ```
 
 ### 2. Workspace Reconnaissance (`--scan`)
-Scans a target project directory for manifests (`pubspec.yaml`, `package.json`, `pyproject.toml`, `firebase.json`, `Cargo.toml`, etc.):
+To inspect an existing project and see what skills match its tech stack:
+
 ```bash
 # Scan current directory
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --scan
+python3 scripts/quartermaster.py --scan
 
-# Scan specific project directory
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --scan /path/to/my-project
+# Scan a specific directory
+python3 scripts/quartermaster.py --scan /path/to/my-project
 ```
 
-### 3. View Complete Armory Catalog (`--catalog`)
-Displays all 7 domains, plugins, skills, and capability tiers (`general_ai_sdlc` vs `domain_specific`):
+If the target folder is empty or uninitialized, the scanner detects this and surfaces the scoping dialogue options.
+
+### 3. Browsing the Catalog (`--catalog`)
+To view all available plugins and skills discovered in your configured library:
+
 ```bash
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --catalog
+python3 scripts/quartermaster.py --catalog
 ```
 
-### 4. Outfitting & Capability Provisioning (`--provision`)
-Copies selected skills or full plugins into `<project_path>/.agents/`:
+### 4. Provisioning Skills and Plugins (`--provision`)
+To copy skills or full plugins into your workspace:
+
 ```bash
-# Provision standalone skills (copies into .agents/skills/)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py \
+# Provision individual standalone skills into .agents/skills/
+python3 scripts/quartermaster.py \
   --provision /path/to/my-project \
   --skills impeccable,spec,pr-review
 
-# Provision full plugins (copies into .agents/plugins/)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py \
+# Provision full plugins into .agents/plugins/
+python3 scripts/quartermaster.py \
   --provision /path/to/my-project \
   --plugins spark-skills,firebase
 ```
 
-### 5. Quartermaster Sweep (`--sweep`)
-Audits active workspace inventory and cross-references the central armory:
-```bash
-# On-demand audit (reports additions and potential pruning)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep /path/to/my-project
+### 5. Running a Project Sweep (`--sweep`)
+To audit what is currently installed against what your project now uses:
 
-# Automated / scheduled mode (strictly evaluates additions, suppresses pruning)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep /path/to/my-project --additions-only --json
+```bash
+# Interactive on-demand sweep (shows additions and potential pruning)
+python3 scripts/quartermaster.py --sweep /path/to/my-project
+
+# Automated background sweep (additions only, machine-readable JSON)
+python3 scripts/quartermaster.py --sweep /path/to/my-project --additions-only --json
 ```
 
 ---
 
-## Antigravity (AGY) Integration
+## Using Quartermaster in Antigravity (AGY)
 
-When using Antigravity, Quartermaster is activated via:
-- `/quartermaster`: Guided 5-stage interactive onboarding.
-- `/quartermaster sweep`: Project evolution audit.
-- Daily Scheduled Task: Recurring cron (`0 9 * * *`) that executes a non-intrusive background sweep with zero friction.
+When working inside Antigravity, you can drive Quartermaster directly via chat:
+
+* **`/quartermaster`**: Launches the guided 5-stage onboarding workflow (Recon &rarr; Scoping &rarr; Armory Review &rarr; Outfitting &rarr; Verification).
+* **`/quartermaster sweep`**: Runs an on-demand audit of your project to see if newly added code warrants new skills.
+* **Daily Cron Task**: Use the `/schedule` command or the built-in scheduler to run a quiet daily sweep (`0 9 * * *`), keeping your project equipped as it grows.
