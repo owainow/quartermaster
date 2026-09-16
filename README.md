@@ -1,6 +1,8 @@
 <div align="center">
 
-# Quartermaster 🛡️
+<img src="assets/logo.png" alt="Quartermaster Logo" width="220" />
+
+# Quartermaster
 
 **Smart, project-scoped capability management for AI coding agents**
 
