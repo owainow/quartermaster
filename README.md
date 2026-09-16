@@ -8,7 +8,7 @@
 
 # Quartermaster
 
-**Smart, project-scoped capability management for AI coding agents**
+**Smart, project-scoped skill & plugin management for AI coding agents**
 
 Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps your tools in a central armory and plucks only what your current project needs directly into `.agents/`.
 
