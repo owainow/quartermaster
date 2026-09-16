@@ -3,16 +3,17 @@
 Quartermaster - Project-Scoped Capability Provisioner & Armory Engine
 References an external central skills library, plucks only project-relevant skills and plugins
 into `<project_path>/.agents/`, scopes brand-new projects, and provides sweep audits with
-configurable pruning governance and in-flow git library imports.
+configurable pruning governance, deterministic Core capability tagging (.core), and in-flow git library imports.
 
 Features:
 - External central library referencing (default: ~/.gemini/skills-library)
 - Dynamic in-flow git imports (--import <git-url>) directly into central library
 - Dual provisioning: Full plugins (.agents/plugins/) and standalone skills (.agents/skills/)
-- Clean capability tiers: Core AI-SDLC (universal) vs Stack-Specific
+- Clean capability tiers: Core Capabilities (deterministic .core marker) vs Stack-Specific
 - Interactive brand-new project scoping with "I'm not sure yet" fallback
-- Project sweep (--sweep) for ongoing audits (additions and pruning)
-- Configurable pruning settings: suggest-pruning (default: true) and auto-prune (default: false)
+- Project sweep (--sweep) for ongoing audits (auto-equip and pruning governance)
+- Core capability management (--core-add, --core-rm, --core-list)
+- Configurable settings: suggest-pruning, auto-prune, pruning-mode (aggressive/soft)
 
 Zero external dependencies beyond Python 3 standard library.
 """
@@ -42,39 +43,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "pruning-mode": "aggressive",
 }
 
-# Universal Core AI-SDLC Capabilities (apply to any software project regardless of language/stack)
-CORE_AI_SDLC_PACKAGES = {"spark-skills", "agora-adlc", "conductor"}
-CORE_AI_SDLC_SKILLS = {
+# ==============================================================================
+# Deterministic Core Capability Governance (.core marker file)
+# ==============================================================================
+CORE_MARKER_FILE = ".core"
+CONVENTIONAL_CORE_NAMES = {
     "spec",
-    "pm",
-    "spec-split",
-    "wayfinder",
     "pr-review",
-    "pr-ready",
+    "pm",
     "preflight",
-    "adversary",
-    "adlc-plan",
-    "adlc-constitution",
-    "adlc-clarify",
-    "adlc-amend",
-    "adlc-explore",
-    "adlc-init",
-    "adlc-test",
-    "adlc-verify",
-    "adlc-critique",
-    "adlc-run",
-    "adlc-audit",
-    "conductor-setup",
-    "conductor-new-track",
-    "conductor-implement",
-    "conductor-status",
-    "conductor-review",
-    "conductor-switch",
-    "conductor-revert",
-    "critic",
-    "reviewer",
-    "planner",
-    "tester",
+    "wayfinder",
+    "review",
 }
 
 
@@ -470,7 +449,21 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             if os.path.exists(os.path.join(pkg_dir, "agents")):
                 components.append("agents")
 
-            p_tier = "core" if pkg.lower() in CORE_AI_SDLC_PACKAGES else "stack"
+            has_core_file = os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
+            is_core_manifest = manifest_data.get("core") is True
+            is_conventional_core_plugin = (
+                plugin_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+                or pkg.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+            )
+            if is_conventional_core_plugin and not has_core_file:
+                try:
+                    with open(os.path.join(pkg_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                        f.write("# Quartermaster Core Capability\n")
+                    has_core_file = True
+                except Exception:
+                    pass
+
+            p_tier = "core" if (has_core_file or is_core_manifest or is_conventional_core_plugin) else "stack"
 
             plugin_info = {
                 "name": plugin_name,
@@ -501,7 +494,26 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             version = meta.get("version")
             tags = meta.get("tags", [])
 
-            s_tier = "core" if (name.lower() in CORE_AI_SDLC_SKILLS or pkg.lower() in CORE_AI_SDLC_PACKAGES) else "stack"
+            has_core_file = (
+                os.path.exists(os.path.join(skill_dir, CORE_MARKER_FILE))
+                or os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
+            )
+            is_core_frontmatter = meta.get("core") is True
+            norm_skill_name = name.lower().replace("_", "-")
+            norm_dir_name = os.path.basename(skill_dir).lower().replace("_", "-")
+            is_conventional_core_skill = (
+                norm_skill_name in CONVENTIONAL_CORE_NAMES
+                or norm_dir_name in CONVENTIONAL_CORE_NAMES
+            )
+            if is_conventional_core_skill and not has_core_file:
+                try:
+                    with open(os.path.join(skill_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                        f.write("# Quartermaster Core Capability\n")
+                    has_core_file = True
+                except Exception:
+                    pass
+
+            s_tier = "core" if (has_core_file or is_core_frontmatter or is_conventional_core_skill) else "stack"
 
             subdirs = [
                 d for d in os.listdir(skill_dir)
@@ -547,7 +559,7 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 # Workspace Reconnaissance & Stack Matching
 # ==============================================================================
 
-def detect_stack(project_path: str) -> Dict[str, Any]:
+def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Scans project root and subdirectories for manifest files.
     Identifies frameworks, detects uninitialized projects,
@@ -768,11 +780,45 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
         })
         add_plugin_rec("cloudrun", "stack", "Serverless container deployment and traffic routing")
 
-    # Universal Core AI-SDLC Baseline (Equipped for any repository)
-    add_skill_rec("spec", "spark-skills", "core", "Spec-driven engineering: write clear functional specs before writing code", priority="Baseline")
-    add_skill_rec("pr-review", "spark-skills", "core", "Adversarial pull request critique, bug detection, and regression guard", priority="Baseline")
-    add_skill_rec("preflight", "spark-skills", "core", "Pre-commit sanity verification, lint checks, and test runner assurance", priority="Baseline")
-    add_skill_rec("wayfinder", "spark-skills", "core", "Deep codebase navigation, dependency mapping, and orientation", priority="Baseline")
+    # Dynamic Core Baseline Capabilities (Equipped for any repository)
+    lib_path = resolve_library_path(library_path)
+    try:
+        catalog = get_catalog(lib_path)
+    except Exception:
+        catalog = {}
+
+    core_found = False
+    for p in catalog.get("plugins", []):
+        if p.get("tier") == "core":
+            add_plugin_rec(
+                p["name"],
+                "core",
+                p.get("description") or "Universal core workflow plugin",
+                priority="Baseline",
+            )
+            core_found = True
+
+    for s in catalog.get("skills", []):
+        if s.get("tier") == "core":
+            add_skill_rec(
+                s["name"],
+                s.get("package", ""),
+                "core",
+                s.get("description") or "Universal core workflow capability",
+                priority="Baseline",
+            )
+            core_found = True
+
+    # Fallback to conventional baseline skills if armory catalog has no core markers yet
+    if not core_found:
+        conventional_defaults = [
+            ("spec", "Spec-driven engineering: write clear functional specs before writing code"),
+            ("pr-review", "Adversarial pull request critique, bug detection, and regression guard"),
+            ("preflight", "Pre-commit sanity verification, lint checks, and test runner assurance"),
+            ("wayfinder", "Deep codebase navigation, dependency mapping, and orientation"),
+        ]
+        for c_name, c_desc in conventional_defaults:
+            add_skill_rec(c_name, "", "core", c_desc, priority="Baseline")
 
     is_brand_new = False
     if not manifests_found:
@@ -799,7 +845,7 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
             ],
             "recommendation_on_unclear": (
                 "When scope is undecided or 'I\\'m not sure yet' is chosen, Quartermaster equips "
-                "only universal Core AI-SDLC guardrails (spec-driven design, adversarial PR review, preflight checks), "
+                "only universal Core capabilities (specifications, adversarial code review, preflight checks), "
                 "keeping your workspace lean until framework choices emerge."
             )
         }
@@ -894,6 +940,13 @@ def provision_assets(
                     ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
                 )
 
+                if plugin["tier"] == "core":
+                    try:
+                        with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                            f.write("# Quartermaster Core Capability\n")
+                    except Exception:
+                        pass
+
                 file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                 provisioned.append({
                     "name": canonical_name,
@@ -924,6 +977,13 @@ def provision_assets(
                     ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
                 )
 
+                if skill["tier"] == "core":
+                    try:
+                        with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                            f.write("# Quartermaster Core Capability\n")
+                    except Exception:
+                        pass
+
                 file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                 provisioned.append({
                     "name": canonical_name,
@@ -952,6 +1012,14 @@ def provision_assets(
                         dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
                     )
+
+                    if skill["tier"] == "core":
+                        try:
+                            with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                f.write("# Quartermaster Core Capability\n")
+                        except Exception:
+                            pass
+
                     file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                     provisioned.append({
                         "name": canonical_name,
@@ -1015,7 +1083,7 @@ def sweep_project(
         final_pruning_mode = "aggressive"
 
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
-    scan = detect_stack(proj_dir)
+    scan = detect_stack(proj_dir, library_path=library_path)
     catalog = get_catalog(library_path)
 
     target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
@@ -1026,6 +1094,14 @@ def sweep_project(
         for s_name in sorted(os.listdir(target_skills_dir)):
             s_path = os.path.join(target_skills_dir, s_name)
             if os.path.isdir(s_path):
+                s_norm = s_name.lower().replace("_", "-")
+                core_marker = os.path.join(s_path, CORE_MARKER_FILE)
+                if not os.path.exists(core_marker) and s_norm in CONVENTIONAL_CORE_NAMES:
+                    try:
+                        with open(core_marker, "w", encoding="utf-8") as f:
+                            f.write("# Quartermaster Core Capability\n")
+                    except Exception:
+                        pass
                 installed_skills.append({
                     "name": s_name,
                     "path": s_path,
@@ -1037,6 +1113,14 @@ def sweep_project(
         for p_name in sorted(os.listdir(target_plugins_dir)):
             p_path = os.path.join(target_plugins_dir, p_name)
             if os.path.isdir(p_path):
+                p_norm = p_name.lower().replace("_", "-")
+                core_marker = os.path.join(p_path, CORE_MARKER_FILE)
+                if not os.path.exists(core_marker) and p_norm in CONVENTIONAL_CORE_NAMES:
+                    try:
+                        with open(core_marker, "w", encoding="utf-8") as f:
+                            f.write("# Quartermaster Core Capability\n")
+                    except Exception:
+                        pass
                 installed_plugins.append({
                     "name": p_name,
                     "path": p_path,
@@ -1169,8 +1253,9 @@ def sweep_project(
         tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
         pkg = ((cat_entry.get("package") or "").lower().replace("_", "-")) if cat_entry else s_norm
 
-        # Core AI-SDLC skills are permanent guardrails and never pruned
-        if tier == "core" or s_norm in CORE_AI_SDLC_SKILLS or pkg in CORE_AI_SDLC_PACKAGES:
+        # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
+        has_core = os.path.exists(os.path.join(s["path"], CORE_MARKER_FILE)) or (tier == "core")
+        if has_core:
             continue
 
         if s_norm in newly_added_skill_names:
@@ -1241,8 +1326,9 @@ def sweep_project(
         cat_entry = catalog_plugins_by_name.get(p_norm) or catalog_plugins_by_name.get(p["name"].lower())
         tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
 
-        # Core AI-SDLC plugins are permanent guardrails and never pruned
-        if tier == "core" or p_norm in CORE_AI_SDLC_PACKAGES:
+        # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
+        has_core = os.path.exists(os.path.join(p["path"], CORE_MARKER_FILE)) or (tier == "core")
+        if has_core:
             continue
 
         if p_norm in newly_added_plugin_names:
@@ -1324,6 +1410,264 @@ def sweep_project(
         "pruned_items": pruned_items,
         "suggest_pruning_enabled": final_suggest_pruning,
         "auto_prune_enabled": final_auto_prune,
+    }
+
+
+# ==============================================================================
+# Core Capability Management (.core marker governance)
+# ==============================================================================
+
+def mark_core(
+    name: str,
+    library_path: Optional[str] = None,
+    project_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Designates a skill, plugin, or package as Core by creating a .core marker file.
+    Searches in:
+    1. Active project workspace (.agents/skills/<name> or .agents/plugins/<name>)
+    2. Central skills library (plugin dir, package dir, or skill dir)
+    """
+    norm = name.strip().lower().replace("_", "-")
+    marked_paths: List[str] = []
+    lib_path = resolve_library_path(library_path)
+
+    proj_dir = None
+    if project_path:
+        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    else:
+        proj_dir = find_project_root()
+
+    # 1. Check workspace
+    if proj_dir and os.path.exists(proj_dir):
+        ws_targets = [
+            os.path.join(proj_dir, ".agents", "skills", name),
+            os.path.join(proj_dir, ".agents", "skills", norm),
+            os.path.join(proj_dir, ".agents", "plugins", name),
+            os.path.join(proj_dir, ".agents", "plugins", norm),
+        ]
+        for t in ws_targets:
+            if os.path.isdir(t):
+                marker = os.path.join(t, CORE_MARKER_FILE)
+                try:
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write("# Quartermaster Core Capability\n")
+                    if marker not in marked_paths:
+                        marked_paths.append(marker)
+                except Exception:
+                    pass
+
+    # 2. Check central library
+    if os.path.exists(lib_path):
+        for entry in os.listdir(lib_path):
+            entry_norm = entry.lower().replace("_", "-")
+            entry_path = os.path.join(lib_path, entry)
+            if os.path.isdir(entry_path) and entry_norm == norm:
+                marker = os.path.join(entry_path, CORE_MARKER_FILE)
+                try:
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write("# Quartermaster Core Capability\n")
+                    if marker not in marked_paths:
+                        marked_paths.append(marker)
+                except Exception:
+                    pass
+
+        for pkg in os.listdir(lib_path):
+            pkg_dir = os.path.join(lib_path, pkg)
+            if not os.path.isdir(pkg_dir) or pkg.startswith("."):
+                continue
+            for root, dirs, files in os.walk(pkg_dir):
+                if "SKILL.md" in files:
+                    skill_name = os.path.basename(root).lower().replace("_", "-")
+                    if skill_name == norm:
+                        marker = os.path.join(root, CORE_MARKER_FILE)
+                        try:
+                            with open(marker, "w", encoding="utf-8") as f:
+                                f.write("# Quartermaster Core Capability\n")
+                            if marker not in marked_paths:
+                                marked_paths.append(marker)
+                        except Exception:
+                            pass
+
+    success = len(marked_paths) > 0
+    return {
+        "status": "marked" if success else "not_found",
+        "name": name,
+        "marked_paths": marked_paths,
+        "message": (
+            f"Designated '{name}' as Core ({len(marked_paths)} location(s) updated)."
+            if success
+            else f"Capability or package '{name}' not found in library or workspace."
+        ),
+    }
+
+
+def unmark_core(
+    name: str,
+    library_path: Optional[str] = None,
+    project_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Removes Core designation from a skill, plugin, or package by deleting its .core marker file.
+    """
+    norm = name.strip().lower().replace("_", "-")
+    unmarked_paths: List[str] = []
+    lib_path = resolve_library_path(library_path)
+
+    proj_dir = None
+    if project_path:
+        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    else:
+        proj_dir = find_project_root()
+
+    # 1. Check workspace
+    if proj_dir and os.path.exists(proj_dir):
+        ws_targets = [
+            os.path.join(proj_dir, ".agents", "skills", name),
+            os.path.join(proj_dir, ".agents", "skills", norm),
+            os.path.join(proj_dir, ".agents", "plugins", name),
+            os.path.join(proj_dir, ".agents", "plugins", norm),
+        ]
+        for t in ws_targets:
+            if os.path.isdir(t):
+                marker = os.path.join(t, CORE_MARKER_FILE)
+                if os.path.exists(marker):
+                    try:
+                        os.remove(marker)
+                        if marker not in unmarked_paths:
+                            unmarked_paths.append(marker)
+                    except Exception:
+                        pass
+
+    # 2. Check central library
+    if os.path.exists(lib_path):
+        for entry in os.listdir(lib_path):
+            entry_norm = entry.lower().replace("_", "-")
+            entry_path = os.path.join(lib_path, entry)
+            if os.path.isdir(entry_path) and entry_norm == norm:
+                marker = os.path.join(entry_path, CORE_MARKER_FILE)
+                if os.path.exists(marker):
+                    try:
+                        os.remove(marker)
+                        if marker not in unmarked_paths:
+                            unmarked_paths.append(marker)
+                    except Exception:
+                        pass
+
+        for pkg in os.listdir(lib_path):
+            pkg_dir = os.path.join(lib_path, pkg)
+            if not os.path.isdir(pkg_dir) or pkg.startswith("."):
+                continue
+            for root, dirs, files in os.walk(pkg_dir):
+                if "SKILL.md" in files:
+                    skill_name = os.path.basename(root).lower().replace("_", "-")
+                    if skill_name == norm:
+                        marker = os.path.join(root, CORE_MARKER_FILE)
+                        if os.path.exists(marker):
+                            try:
+                                os.remove(marker)
+                                if marker not in unmarked_paths:
+                                    unmarked_paths.append(marker)
+                            except Exception:
+                                pass
+
+    success = len(unmarked_paths) > 0
+    return {
+        "status": "unmarked" if success else "not_found",
+        "name": name,
+        "unmarked_paths": unmarked_paths,
+        "message": (
+            f"Removed Core designation from '{name}' ({len(unmarked_paths)} marker(s) removed)."
+            if success
+            else f"No .core marker file found for '{name}' in library or workspace."
+        ),
+    }
+
+
+def list_core(
+    library_path: Optional[str] = None,
+    project_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Lists all capabilities designated as Core across the central library and current workspace.
+    """
+    lib_path = resolve_library_path(library_path)
+    proj_dir = None
+    if project_path:
+        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    else:
+        proj_dir = find_project_root()
+
+    catalog = get_catalog(lib_path)
+    core_items: Dict[str, Dict[str, Any]] = {}
+
+    # From Library Catalog
+    for p in catalog.get("plugins", []):
+        if p.get("tier") == "core":
+            p_name = p["name"]
+            core_items[p_name] = {
+                "name": p_name,
+                "type": "plugin",
+                "package": p.get("package", p_name),
+                "in_library": True,
+                "in_workspace": False,
+                "description": p.get("description", ""),
+            }
+
+    for s in catalog.get("skills", []):
+        if s.get("tier") == "core":
+            s_name = s["name"]
+            core_items[s_name] = {
+                "name": s_name,
+                "type": "skill",
+                "package": s.get("package", ""),
+                "in_library": True,
+                "in_workspace": False,
+                "description": s.get("description", ""),
+            }
+
+    # From Workspace
+    if proj_dir and os.path.exists(proj_dir):
+        ws_skills_dir = os.path.join(proj_dir, ".agents", "skills")
+        if os.path.isdir(ws_skills_dir):
+            for s_name in os.listdir(ws_skills_dir):
+                s_dir = os.path.join(ws_skills_dir, s_name)
+                if os.path.isdir(s_dir) and os.path.exists(os.path.join(s_dir, CORE_MARKER_FILE)):
+                    if s_name in core_items:
+                        core_items[s_name]["in_workspace"] = True
+                    else:
+                        core_items[s_name] = {
+                            "name": s_name,
+                            "type": "skill",
+                            "package": "workspace-local",
+                            "in_library": False,
+                            "in_workspace": True,
+                            "description": "Workspace-local core capability",
+                        }
+
+        ws_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
+        if os.path.isdir(ws_plugins_dir):
+            for p_name in os.listdir(ws_plugins_dir):
+                p_dir = os.path.join(ws_plugins_dir, p_name)
+                if os.path.isdir(p_dir) and os.path.exists(os.path.join(p_dir, CORE_MARKER_FILE)):
+                    if p_name in core_items:
+                        core_items[p_name]["in_workspace"] = True
+                    else:
+                        core_items[p_name] = {
+                            "name": p_name,
+                            "type": "plugin",
+                            "package": "workspace-local",
+                            "in_library": False,
+                            "in_workspace": True,
+                            "description": "Workspace-local core capability",
+                        }
+
+    items_list = sorted(core_items.values(), key=lambda x: (x["type"], x["name"]))
+    return {
+        "library_path": lib_path,
+        "project_path": proj_dir,
+        "total_core": len(items_list),
+        "core_capabilities": items_list,
     }
 
 
@@ -1568,6 +1912,87 @@ def format_import_text(res: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_core_list(data: Dict[str, Any]) -> str:
+    """Formats the list of Core capabilities."""
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("  QUARTERMASTER CORE CAPABILITIES REPORT")
+    lines.append(f"  Skills Library: {data.get('library_path')}")
+    if data.get("project_path"):
+        lines.append(f"  Active Workspace: {data.get('project_path')}")
+    lines.append(f"  Total Core Capabilities: {data.get('total_core', 0)}")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append(
+        "Core capabilities are permanent workflow guardrails. They are auto-equipped"
+    )
+    lines.append(
+        "into every project and are protected from pruning during sweeps."
+    )
+    lines.append("")
+
+    items = data.get("core_capabilities", [])
+    if not items:
+        lines.append("No capabilities are currently designated as Core.")
+        lines.append("Use /quartermaster core add <name> to designate a core capability.")
+    else:
+        lines.append(f"{'Capability':<28} {'Type':<10} {'Source':<18} {'Status'}")
+        lines.append("-" * 75)
+        for item in items:
+            name = item["name"]
+            c_type = item["type"].capitalize()
+            in_lib = item.get("in_library", False)
+            in_ws = item.get("in_workspace", False)
+            if in_lib and in_ws:
+                src = "Library + Project"
+                status = "Active & Protected"
+            elif in_ws:
+                src = "Project Only"
+                status = "Active & Protected"
+            else:
+                src = "Library Armory"
+                status = "Ready to equip"
+            lines.append(f"{name:<28} {c_type:<10} {src:<18} {status}")
+
+    lines.append("")
+    lines.append("=" * 80)
+    return "\n".join(lines)
+
+
+def format_core_add(data: Dict[str, Any]) -> str:
+    """Formats core designation confirmation."""
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("  QUARTERMASTER CORE DESIGNATION")
+    lines.append("=" * 80)
+    lines.append(data.get("message", ""))
+    paths = data.get("marked_paths", [])
+    if paths:
+        lines.append("\nUpdated Marker Locations:")
+        for p in paths:
+            lines.append(f"  + {p}")
+        lines.append("\nThis capability is now protected from pruning and auto-equipped on setup.")
+    lines.append("=" * 80)
+    return "\n".join(lines)
+
+
+def format_core_rm(data: Dict[str, Any]) -> str:
+    """Formats core designation removal confirmation."""
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("  QUARTERMASTER CORE DESIGNATION REMOVAL")
+    lines.append("=" * 80)
+    lines.append(data.get("message", ""))
+    paths = data.get("unmarked_paths", [])
+    if paths:
+        lines.append("\nRemoved Markers:")
+        for p in paths:
+            lines.append(f"  - {p}")
+        lines.append("\nThis capability will now be subject to standard stack pruning during sweeps.")
+    lines.append("=" * 80)
+    return "\n".join(lines)
+
+
 # ==============================================================================
 # CLI Entry Point
 # ==============================================================================
@@ -1680,6 +2105,21 @@ def main() -> int:
         help="Output raw machine-readable JSON instead of formatted text.",
     )
     parser.add_argument(
+        "--core-add",
+        metavar="NAME",
+        help="Designate a package, plugin, or skill as Core by attaching a .core marker file (protects from sweep pruning and auto-equips).",
+    )
+    parser.add_argument(
+        "--core-rm",
+        metavar="NAME",
+        help="Remove Core designation from a package, plugin, or skill by deleting its .core marker file.",
+    )
+    parser.add_argument(
+        "--core-list",
+        action="store_true",
+        help="List all capabilities designated as Core across the central armory and current workspace.",
+    )
+    parser.add_argument(
         "--library",
         metavar="PATH",
         help="Override skills-library directory path for this execution.",
@@ -1730,8 +2170,42 @@ def main() -> int:
             interactive_config()
         return 0
 
+    # Core Designation Actions
+    if args.core_add:
+        proj_arg = args.project if args.project else find_project_root()
+        res = mark_core(args.core_add, library_path=args.library, project_path=proj_arg)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(format_core_add(res))
+        return 0 if res.get("status") == "marked" else 1
+
+    if args.core_rm:
+        proj_arg = args.project if args.project else find_project_root()
+        res = unmark_core(args.core_rm, library_path=args.library, project_path=proj_arg)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(format_core_rm(res))
+        return 0 if res.get("status") == "unmarked" else 1
+
+    if args.core_list:
+        proj_arg = args.project if args.project else find_project_root()
+        res = list_core(library_path=args.library, project_path=proj_arg)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(format_core_list(res))
+        return 0
+
     # If no action flag passed, show help
-    if not args.catalog and args.scan is None and not args.provision and args.sweep is None:
+    if (
+        not args.catalog
+        and args.scan is None
+        and not args.provision
+        and args.sweep is None
+        and not args.core_list
+    ):
         parser.print_help()
         return 0
 
@@ -1745,7 +2219,7 @@ def main() -> int:
             return 0
 
         if args.scan is not None:
-            scan_res = detect_stack(args.scan)
+            scan_res = detect_stack(args.scan, library_path=args.library)
             if args.json:
                 print(json.dumps(scan_res, indent=2))
             else:

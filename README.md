@@ -66,6 +66,7 @@ Quartermaster is an Antigravity skill designed to be driven directly from your a
 | **`/quartermaster`** | Scans current repo, scopes what you need, and outfits `.agents/` |
 | **`/quartermaster sweep`** | Audits installed tools, recommends new additions, and suggests pruning |
 | **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your project |
+| **`/quartermaster core [add\|remove\|list]`** | Designates or removes Core tools via deterministic `.core` marker files |
 | **`/quartermaster catalog`** | Browses all available capabilities in your central armory |
 | **`/quartermaster config`** | Checks or updates your library path and pruning settings |
 | **`/quartermaster schedule`** | Sets up or verifies the automated daily sweep for your workspace |
@@ -76,7 +77,7 @@ Quartermaster is an Antigravity skill designed to be driven directly from your a
 
 Type `/quartermaster` in your chat. Quartermaster inspects your project manifests (`package.json`, `pubspec.yaml`, `pyproject.toml`, `Dockerfile`, etc.), presents matching capabilities from your central library, and outfits `.agents/` with only what your stack needs.
 
-Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quartermaster equips universal Core AI-SDLC guardrails (specifications, adversarial review, and preflight sanity checks) without guessing frameworks prematurely.
+Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quartermaster equips universal Core capabilities (specifications, adversarial code review, and preflight sanity checks) without guessing frameworks prematurely.
 
 ---
 
@@ -85,6 +86,7 @@ Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quarter
 Codebases change as you build. Run `/quartermaster sweep` at any time to:
 - **Auto-Equip New Capabilities**: Because your central skills library is an already-curated collection of tools, Quartermaster **automatically provisions** matching skills and plugins straight into `.agents/` as soon as new dependencies appear in your project.
 - **Highlight Unneeded Tools**: Identifies installed tools whose manifests were removed so your agent prompts stay lean.
+- **Protect Core Guardrails**: Any tool marked with a `.core` file is immune to sweep pruning.
 
 Flags supported:
 - `/quartermaster sweep --aggressive`: Enforces strict stack alignment (default). Flags any installed tools not matched by current tech manifests.
@@ -109,13 +111,25 @@ Quartermaster performs dual outfitting:
 
 ---
 
-### 4. Explore Available Capabilities: `/quartermaster catalog`
+### 4. Manage Core Guardrails: `/quartermaster core [add|remove|list]`
 
-Want to see what tools are in your armory? Run `/quartermaster catalog` in chat to view a breakdown of every skill and plugin in your library, grouped by package and classified as either Core AI-SDLC or Stack-specific.
+Quartermaster uses a deterministic `.core` marker file inside skill and plugin folders to identify permanent guardrails. Core capabilities are always auto-equipped on onboarding and are strictly immune to sweep pruning.
+
+- **`/quartermaster core list`**: Displays all active and armory Core capabilities and their protection status.
+- **`/quartermaster core add <name>`**: Designates a tool as Core by placing a `.core` marker file in its folder across your project and library.
+- **`/quartermaster core remove <name>`**: Removes the `.core` marker file so the tool follows standard stack pruning rules.
+
+Conventional workflow tools (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`, `review`) are bootstrapped with `.core` markers automatically.
 
 ---
 
-### 5. Check or Change Settings: `/quartermaster config`
+### 5. Explore Available Capabilities: `/quartermaster catalog`
+
+Want to see what tools are in your armory? Run `/quartermaster catalog` in chat to view a breakdown of every skill and plugin in your library, grouped by package and classified as either Core or Stack-specific.
+
+---
+
+### 6. Check or Change Settings: `/quartermaster config`
 
 Type `/quartermaster config` in chat to inspect your active settings or update:
 - `skills-library`: The folder where all your skills and plugins are stored (default: `~/.gemini/skills-library`).
@@ -131,6 +145,9 @@ Type `/quartermaster config` in chat to inspect your active settings or update:
 ### Central Library with Project-Scoped Plucking
 Collect every skill, plugin, and tool in your central library (`~/.gemini/skills-library`). Quartermaster inspects your project dependencies and plucks only the tools you actually need into `.agents/`. Your agent gets the exact capabilities it needs, and nothing more.
 
+### Deterministic Core Governance (.core Markers)
+Rather than maintaining hardcoded lists of privileged packages, Quartermaster uses a transparent, filesystem-based `.core` marker file in each capability folder. Core tools are auto-equipped on onboarding and are strictly immune to pruning during sweeps. Users can designate any skill or package as Core via `/quartermaster core add <name>`.
+
 ### In-Flow Git Import & Instant Outfitting
 You never have to stop coding or open a terminal window to install new agent capabilities. Paste a Git repository URL directly into your chat, and Quartermaster brings it into your central armory and immediately equips it into your current project.
 
@@ -142,12 +159,12 @@ Different tools come in different shapes. Quartermaster handles both automatical
 ### Brand-New Projects & "I'm Not Sure Yet"
 Starting an empty repo from scratch? Quartermaster asks what kind of software you want to build. If you haven't decided on a stack, choose **"I'm not sure yet"**.
 
-Instead of guessing frameworks prematurely, Quartermaster equips universal Core AI-SDLC guardrails (specifications, adversarial code review, and preflight sanity checks). You get solid engineering fundamentals from day one, and Quartermaster will recommend stack-specific tools once code and manifests appear.
+Instead of guessing frameworks prematurely, Quartermaster equips universal Core capabilities (specifications, adversarial code review, and preflight sanity checks). You get solid engineering fundamentals from day one, and Quartermaster will recommend stack-specific tools once code and manifests appear.
 
 ### Intelligent Sweeps & Pruning Modes
 Running a sweep audits your current `.agents/` folder against your code:
 - **Automatically equips matching tools**: As soon as you add new manifests (`package.json`, `pyproject.toml`, etc.), Quartermaster detects matching tools in your central library and installs them directly into `.agents/`.
-- **Aggressive Pruning (Default)**: Strict stack alignment. If a tool in `.agents/` is not a protected Core AI-SDLC skill and does not match active workspace manifests, Quartermaster flags it for removal. Because re-equipping from your local library takes milliseconds, keeping your workspace lean prevents context window pollution and token waste.
+- **Aggressive Pruning (Default)**: Strict stack alignment. If a tool in `.agents/` does not contain a `.core` marker file and does not match active workspace manifests, Quartermaster flags it for removal. Because re-equipping from your local library takes milliseconds, keeping your workspace lean prevents context window pollution and token waste.
 - **Soft Pruning (Optional)**: Conservative retention. Retains cross-cutting or auxiliary tools (such as browser inspection or design polish) unless an explicit manifest contradiction occurs.
 - **Configurable Settings**:
   - `auto-add` (default: `true`): Automatically provisions newly matched tools straight into `.agents/`.

@@ -1,6 +1,6 @@
 ---
 name: quartermaster
-description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster catalog, /quartermaster config, or /quartermaster schedule.
+description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, manages deterministic Core capabilities (.core marker files), and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster core [add|remove|list], /quartermaster catalog, /quartermaster config, or /quartermaster schedule.
 ---
 
 # Quartermaster: Project Onboarding & Skill Provisioning Armory
@@ -18,8 +18,9 @@ Quartermaster references an external central **skills library** (default: `~/.ge
 | **`/quartermaster`** | Run 5-stage workspace recon, scoping, capability provisioning, and auto-schedule |
 | **`/quartermaster sweep`** | Audit active tools, recommend additions, and suggest or auto-prune unneeded tools |
 | **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your active project |
+| **`/quartermaster core [add\|remove\|list]`** | Designate or remove Core capabilities via deterministic `.core` marker files |
 | **`/quartermaster catalog`** | Browse all packages, plugins, and skills available in the central library |
-| **`/quartermaster config`** | View or modify settings (`skills-library`, `suggest-pruning`, `auto-prune`) |
+| **`/quartermaster config`** | View or modify settings (`skills-library`, `pruning-mode`, `auto-prune`) |
 | **`/quartermaster schedule`** | Automatically register or verify the daily background sweep for this workspace |
 
 ---
@@ -63,13 +64,13 @@ If `status == "unscoped_new_project"` (no manifests found or empty directory):
 
 2. **The "I'm not sure yet" Rule**:
    > [!IMPORTANT]
-   > Whenever the user chooses **"I'm not sure yet"** or the scope is broad/unclear, Quartermaster **strictly equips universal Core AI-SDLC skills only** (`spec`, `pr-review`, `preflight`, `wayfinder`).
+   > Whenever the user chooses **"I'm not sure yet"** or the scope is broad/unclear, Quartermaster **strictly equips universal Core capabilities only** (specifications, code review, preflight checks, and orientation).
    > It explicitly avoids stack-specific tools (e.g. Flutter, Firebase, DevTools) until tech stack choices emerge. Explain this rationale to the user:
-   > *"Since the project scope is still emerging, I will equip only foundational AI-SDLC guardrails (spec-driven engineering, adversarial review, preflight checks). As you create manifests and code, Quartermaster will suggest matching tech skills later via the daily sweep."*
+   > *"Since the project scope is still emerging, I will equip only foundational workflow guardrails (spec-driven engineering, adversarial review, preflight checks). As you create manifests and code, Quartermaster will suggest matching tech skills later via the daily sweep."*
 
 #### Scenario B: Active Project with Identified Manifests
 Present the detected technologies and categorize recommendations:
-- **Core AI-SDLC Baseline**: Universal guardrails (`spec`, `pr-review`, `preflight`, `wayfinder`).
+- **Core Capabilities Baseline**: Universal guardrails (`spec`, `pr-review`, `preflight`, `wayfinder`, `pm`).
 - **Stack-Specific Capabilities**: Matched plugins (e.g. `modern-web-guidance-plugin`, `firebase`, `flutter`) and skills (e.g. `impeccable`, `uv`).
 
 ---
@@ -94,7 +95,7 @@ python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py \
 ```
 
 Quartermaster automatically routes:
-- **Full Plugins** (packages containing `plugin.json`, e.g. `spark-skills`, `firebase`, `flutter`) &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
+- **Full Plugins** (packages containing `plugin.json`, e.g. `modern-web-guidance-plugin`, `firebase`, `flutter`) &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
 - **Standalone Skills** (e.g. `impeccable`, `uv`) &rarr; `<project_path>/.agents/skills/<skill_name>/`
 
 ---
@@ -107,7 +108,7 @@ Quartermaster automatically routes:
 2. **Present Confirmation Summary**:
    | Capability Name | Type | Destination |
    | :--- | :--- | :--- |
-   | `spark-skills` | Plugin | `.agents/plugins/spark-skills/` |
+   | `modern-web-guidance-plugin` | Plugin | `.agents/plugins/modern-web-guidance-plugin/` |
    | `impeccable` | Skill | `.agents/skills/impeccable/` |
 3. **Automatically Register Daily Sweep**:
    - Actively call the `schedule` tool:
@@ -147,7 +148,7 @@ Flags supported:
      - **Soft**: Conservative retention. Preserves cross-cutting tools (e.g. web devtools or design craft) unless hard manifest contradictions exist.
    - If `auto-prune` is enabled (`true`), deletes them automatically from `.agents/`.
    - If `suggest-pruning` is enabled (`true`, default), lists them as removal recommendations so the developer can decide.
-   - Core AI-SDLC skills (`spec`, `pr-review`, `preflight`, `wayfinder`) are permanent guardrails and are never marked for pruning.
+   - Core capabilities (marked with a `.core` file, such as `spec`, `pr-review`, `preflight`, `wayfinder`, `pm`) are permanent guardrails and are never marked for pruning.
 
 ---
 
@@ -170,17 +171,48 @@ Quartermaster performs dual action:
 
 ---
 
-## Command 4: Browse Catalog (`/quartermaster catalog`)
+## Command 4: Core Capability Governance (`/quartermaster core [add|remove|list]`)
+
+Quartermaster uses a deterministic `.core` marker file inside skill and plugin folders to identify permanent guardrails. Core capabilities are always auto-equipped on onboarding and are strictly immune to sweep pruning.
+
+Conventional workflow capabilities (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`, `review`) are automatically bootstrapped with `.core` files during scans, catalog checks, or sweeps.
+
+Users can also explicitly designate custom packages or tools as Core:
+
+### 1. List Core Capabilities:
+```bash
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --core-list
+```
+Or within a specific workspace:
+```bash
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --core-list --project <project_path>
+```
+
+### 2. Designate a Capability as Core:
+```bash
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --core-add <name> --project <project_path>
+```
+Attaches a `.core` marker file in the matching skill/plugin directory within the workspace and the central library armory. Once marked, this tool will never be pruned during sweeps and will be equipped on initial setup.
+
+### 3. Remove Core Designation:
+```bash
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --core-rm <name> --project <project_path>
+```
+Deletes the `.core` marker file, returning the capability to standard stack-aligned pruning governance.
+
+---
+
+## Command 5: Browse Catalog (`/quartermaster catalog`)
 
 When the user runs `/quartermaster catalog`, execute:
 ```bash
 python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --catalog
 ```
-Present the discovered packages, plugins, and skills from the central library, clearly distinguishing between Core AI-SDLC guardrails and stack-specific tools.
+Present the discovered packages, plugins, and skills from the central library, clearly distinguishing between Core guardrails and stack-specific tools.
 
 ---
 
-## Command 5: Settings & Config (`/quartermaster config`)
+## Command 6: Settings & Config (`/quartermaster config`)
 
 When the user asks to view or change settings:
 ```bash
@@ -202,7 +234,7 @@ Settings keys:
 
 ---
 
-## Command 6: Schedule Daily Sweep (`/quartermaster schedule`)
+## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
 
 When the user runs `/quartermaster schedule`:
 1. Actively call the `schedule` tool:
