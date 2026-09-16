@@ -39,6 +39,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "auto-add": True,
     "suggest-pruning": True,
     "auto-prune": False,
+    "pruning-mode": "aggressive",
 }
 
 # Universal Core AI-SDLC Capabilities (apply to any software project regardless of language/stack)
@@ -129,6 +130,12 @@ def set_config_value(key: str, value: Any) -> Dict[str, Any]:
             value = True
         elif value.lower() in ("false", "0", "no", "off"):
             value = False
+        elif key in ("pruning-mode", "prune-mode"):
+            value = value.lower()
+            if value not in ("aggressive", "soft"):
+                value = "aggressive"
+    if key == "prune-mode":
+        key = "pruning-mode"
     cfg[key] = value
     save_config(cfg)
     return cfg
@@ -166,19 +173,22 @@ def interactive_config() -> None:
     print("\nSettings:")
     print(f"  * skills-library  = {cfg.get('skills-library')}")
     print(f"  * auto-add        = {cfg.get('auto-add', True)} (automatically provision matching capabilities during sweep)")
-    print(f"  * suggest-pruning = {cfg.get('suggest-pruning')} (suggest unneeded skills to remove during sweep)")
-    print(f"  * auto-prune      = {cfg.get('auto-prune')} (automatically remove unneeded skills during sweep)")
+    print(f"  * suggest-pruning = {cfg.get('suggest-pruning', True)} (suggest unneeded skills to remove during sweep)")
+    print(f"  * auto-prune      = {cfg.get('auto-prune', False)} (automatically remove unneeded skills during sweep)")
+    current_prune_mode = cfg.get("pruning-mode") or cfg.get("prune-mode") or "aggressive"
+    print(f"  * pruning-mode    = {current_prune_mode} (aggressive = strict stack alignment; soft = conservative retention)")
 
     print("-" * 80)
     print("Options:")
     print("  1. Update 'skills-library' path")
     print(f"  2. Toggle 'auto-add' (currently: {cfg.get('auto-add', True)})")
-    print(f"  3. Toggle 'suggest-pruning' (currently: {cfg.get('suggest-pruning')})")
-    print(f"  4. Toggle 'auto-prune' (currently: {cfg.get('auto-prune')})")
-    print("  5. Reset settings to default")
-    print("  6. Exit")
+    print(f"  3. Toggle 'suggest-pruning' (currently: {cfg.get('suggest-pruning', True)})")
+    print(f"  4. Toggle 'auto-prune' (currently: {cfg.get('auto-prune', False)})")
+    print(f"  5. Toggle 'pruning-mode' (currently: {current_prune_mode})")
+    print("  6. Reset settings to default")
+    print("  7. Exit")
 
-    choice = input("\nEnter choice [1-6] (default: 6): ").strip()
+    choice = input("\nEnter choice [1-7] (default: 7): ").strip()
     if choice == "1":
         current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
         new_val = input(f"Enter new skills-library path [{current}]: ").strip()
@@ -205,6 +215,10 @@ def interactive_config() -> None:
         set_config_value("auto-prune", new_val)
         print(f"\nUpdated 'auto-prune' to: {new_val}")
     elif choice == "5":
+        new_val = "soft" if current_prune_mode.lower() == "aggressive" else "aggressive"
+        set_config_value("pruning-mode", new_val)
+        print(f"\nUpdated 'pruning-mode' to: {new_val}")
+    elif choice == "6":
         save_config(dict(DEFAULT_CONFIG))
         print("\nSettings reset to default.")
     else:
@@ -598,6 +612,16 @@ def detect_stack(project_path: str) -> Dict[str, Any]:
         add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
         add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
         add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
+    elif os.path.exists(os.path.join(proj_dir, "index.html")):
+        manifests_found.append("index.html")
+        technologies.append({
+            "name": "Static Web / HTML",
+            "manifest": "index.html",
+            "details": "Static HTML/CSS/JavaScript",
+        })
+        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
+        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
+        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
 
     # Chrome Extension (manifest.json)
     manifest_json_path = os.path.join(proj_dir, "manifest.json")
@@ -878,6 +902,7 @@ def sweep_project(
     auto_add: Optional[bool] = None,
     suggest_pruning: Optional[bool] = None,
     auto_prune: Optional[bool] = None,
+    pruning_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Audits the workspace:
@@ -886,6 +911,7 @@ def sweep_project(
     3. Identifies newly relevant additions:
        - If auto_add is True (default): automatically provisions them into `.agents/`.
     4. Evaluates unneeded stack tools:
+       - Pruning mode can be 'aggressive' (strict stack alignment) or 'soft' (conservative retention).
        - If suggest_pruning is True: lists them as removal recommendations.
        - If auto_prune is True: automatically uninstalls them from `.agents/`.
     """
@@ -893,6 +919,15 @@ def sweep_project(
     final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
     final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
     final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
+
+    raw_mode = (
+        pruning_mode
+        if pruning_mode
+        else (cfg.get("pruning-mode") or cfg.get("prune-mode") or "aggressive")
+    )
+    final_pruning_mode = str(raw_mode).lower().strip()
+    if final_pruning_mode not in ("aggressive", "soft"):
+        final_pruning_mode = "aggressive"
 
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     scan = detect_stack(proj_dir)
@@ -983,30 +1018,121 @@ def sweep_project(
     pruned_items: List[Dict[str, Any]] = []
 
     manifest_list = scan.get("manifests_found", [])
-    catalog_skills_by_name = {s["name"].lower(): s for s in catalog.get("skills", [])}
+    has_web = (
+        any(m in ("package.json", "manifest.json", "index.html") for m in manifest_list)
+        or os.path.exists(os.path.join(proj_dir, "package.json"))
+        or os.path.exists(os.path.join(proj_dir, "index.html"))
+        or os.path.exists(os.path.join(proj_dir, "manifest.json"))
+    )
+    has_flutter = (
+        "pubspec.yaml" in manifest_list
+        or os.path.exists(os.path.join(proj_dir, "pubspec.yaml"))
+    )
+    has_android = (
+        any("android" in m or "gradle" in m for m in manifest_list)
+        or os.path.exists(os.path.join(proj_dir, "android"))
+        or os.path.exists(os.path.join(proj_dir, "build.gradle"))
+        or os.path.exists(os.path.join(proj_dir, "build.gradle.kts"))
+    )
+    has_firebase = (
+        any("firebase" in m for m in manifest_list)
+        or os.path.exists(os.path.join(proj_dir, "firebase.json"))
+        or os.path.exists(os.path.join(proj_dir, ".firebaserc"))
+    )
+    has_python = (
+        any(m in ("pyproject.toml", "requirements.txt", "Pipfile", "setup.py") for m in manifest_list)
+        or any(
+            os.path.exists(os.path.join(proj_dir, f))
+            for f in ("pyproject.toml", "requirements.txt", "Pipfile", "setup.py")
+        )
+    )
+    has_docker = (
+        any("docker" in m.lower() for m in manifest_list)
+        or os.path.exists(os.path.join(proj_dir, "Dockerfile"))
+        or os.path.exists(os.path.join(proj_dir, "docker-compose.yml"))
+    )
+
+    rec_plugin_names = {p["name"].lower().replace("_", "-") for p in scan.get("recommended_plugins", [])}
+    rec_skill_names = {s["name"].lower().replace("_", "-") for s in scan.get("recommended_skills", [])}
+    rec_packages = set(rec_plugin_names)
+    for rs in scan.get("recommended_skills", []):
+        pkg = (rs.get("package") or "").lower().replace("_", "-")
+        if pkg:
+            rec_packages.add(pkg)
+
+    newly_added_skill_names = {
+        pa["name"].lower().replace("_", "-")
+        for pa in provisioned_additions
+        if pa.get("type") == "skill"
+    }
+    newly_added_plugin_names = {
+        pa["name"].lower().replace("_", "-")
+        for pa in provisioned_additions
+        if pa.get("type") == "plugin"
+    }
+
+    catalog_skills_by_name = {
+        s["name"].lower().replace("_", "-"): s for s in catalog.get("skills", [])
+    }
+    catalog_plugins_by_name = {
+        p["name"].lower().replace("_", "-"): p for p in catalog.get("plugins", [])
+    }
 
     for s in installed_skills:
-        s_name = s["name"].lower()
-        cat_entry = catalog_skills_by_name.get(s_name)
+        s_norm = s["name"].lower().replace("_", "-")
+        cat_entry = catalog_skills_by_name.get(s_norm) or catalog_skills_by_name.get(s["name"].lower())
         tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
-        pkg = (cat_entry.get("package") or "").lower() if cat_entry else s_name
+        pkg = ((cat_entry.get("package") or "").lower().replace("_", "-")) if cat_entry else s_norm
 
-        # Core AI-SDLC skills are never pruned
-        if tier == "core" or s_name in CORE_AI_SDLC_SKILLS or pkg in CORE_AI_SDLC_PACKAGES:
+        # Core AI-SDLC skills are permanent guardrails and never pruned
+        if tier == "core" or s_norm in CORE_AI_SDLC_SKILLS or pkg in CORE_AI_SDLC_PACKAGES:
+            continue
+
+        if s_norm in newly_added_skill_names:
             continue
 
         is_orphaned = False
         reason = ""
 
-        if ("flutter" in pkg or "flutter" in s_name) and "pubspec.yaml" not in manifest_list:
-            is_orphaned = True
-            reason = "Flutter skill installed but no pubspec.yaml found in workspace"
-        elif ("firebase" in pkg or "firebase" in s_name) and not any("firebase" in m for m in manifest_list):
-            is_orphaned = True
-            reason = "Firebase skill installed but no firebase.json / .firebaserc found in workspace"
-        elif ("android" in pkg or "android" in s_name) and not any("android" in m or "gradle" in m for m in manifest_list):
-            is_orphaned = True
-            reason = "Android CLI tool installed but no Android/Gradle manifests found"
+        is_web_skill = s_norm in ("impeccable", "chrome-extensions") or "web" in s_norm or "chrome" in s_norm or "modern-web" in pkg
+        is_flutter_skill = "flutter" in s_norm or "flutter" in pkg or "dart" in s_norm
+        is_firebase_skill = "firebase" in s_norm or "firebase" in pkg
+        is_android_skill = "android" in s_norm or "android" in pkg or "gradle" in s_norm
+        is_python_skill = s_norm in ("uv",) or "python" in s_norm or "science" in pkg
+        is_docker_skill = "cloudrun" in s_norm or "docker" in s_norm
+
+        if final_pruning_mode == "aggressive":
+            is_matched = (s_norm in rec_skill_names) or (pkg in rec_packages)
+            if not is_matched:
+                is_orphaned = True
+                if is_web_skill and not has_web:
+                    reason = "Web/Frontend skill installed, but no web manifests (package.json, HTML) found in workspace"
+                elif is_flutter_skill and not has_flutter:
+                    reason = "Flutter skill installed, but no pubspec.yaml found in workspace"
+                elif is_firebase_skill and not has_firebase:
+                    reason = "Firebase skill installed, but no firebase.json / .firebaserc found in workspace"
+                elif is_android_skill and not has_android:
+                    reason = "Android tool installed, but no Android/Gradle manifests found"
+                elif is_python_skill and not has_python:
+                    reason = "Python skill installed, but no Python manifests found in workspace"
+                elif is_docker_skill and not has_docker:
+                    reason = "Container skill installed, but no Dockerfile / docker-compose.yml found in workspace"
+                else:
+                    reason = f"Skill '{s['name']}' does not match any currently active technology in this workspace"
+        else:
+            # Soft mode: conservative retention, only flag clear negative contradictions
+            if is_flutter_skill and not has_flutter:
+                is_orphaned = True
+                reason = "Flutter skill installed but no pubspec.yaml found in workspace"
+            elif is_firebase_skill and not has_firebase:
+                is_orphaned = True
+                reason = "Firebase skill installed but no firebase.json / .firebaserc found in workspace"
+            elif is_android_skill and not has_android:
+                is_orphaned = True
+                reason = "Android tool installed but no Android/Gradle manifests found"
+            elif is_docker_skill and not has_docker:
+                is_orphaned = True
+                reason = "Container skill installed but no Dockerfile / docker-compose.yml found"
 
         if is_orphaned:
             candidate = {
@@ -1025,28 +1151,60 @@ def sweep_project(
             elif final_suggest_pruning:
                 pruning_candidates.append(candidate)
 
-    catalog_plugins_by_name = {p["name"].lower(): p for p in catalog.get("plugins", [])}
     for p in installed_plugins:
-        p_name = p["name"].lower()
-        cat_entry = catalog_plugins_by_name.get(p_name)
+        p_norm = p["name"].lower().replace("_", "-")
+        cat_entry = catalog_plugins_by_name.get(p_norm) or catalog_plugins_by_name.get(p["name"].lower())
         tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
 
-        # Core AI-SDLC plugins are never pruned
-        if tier == "core" or p_name in CORE_AI_SDLC_PACKAGES:
+        # Core AI-SDLC plugins are permanent guardrails and never pruned
+        if tier == "core" or p_norm in CORE_AI_SDLC_PACKAGES:
+            continue
+
+        if p_norm in newly_added_plugin_names:
             continue
 
         is_orphaned = False
         reason = ""
 
-        if "flutter" in p_name and "pubspec.yaml" not in manifest_list:
-            is_orphaned = True
-            reason = "Flutter plugin installed but no pubspec.yaml found in workspace"
-        elif "firebase" in p_name and not any("firebase" in m for m in manifest_list):
-            is_orphaned = True
-            reason = "Firebase plugin installed but no firebase.json / .firebaserc found in workspace"
-        elif "android" in p_name and not any("android" in m or "gradle" in m for m in manifest_list):
-            is_orphaned = True
-            reason = "Android CLI plugin installed but no Android/Gradle manifests found"
+        is_web_plugin = p_norm in ("modern-web-guidance-plugin", "chrome-devtools-plugin") or "web" in p_norm or "chrome" in p_norm
+        is_flutter_plugin = "flutter" in p_norm
+        is_firebase_plugin = "firebase" in p_norm
+        is_android_plugin = "android" in p_norm
+        is_docker_plugin = "cloudrun" in p_norm or "docker" in p_norm
+        is_antigravity_plugin = "google-antigravity-sdk" in p_norm
+
+        if final_pruning_mode == "aggressive":
+            is_matched = p_norm in rec_plugin_names
+            if not is_matched:
+                is_orphaned = True
+                if is_web_plugin and not has_web:
+                    reason = "Web/DevTools plugin installed, but no web manifests or frontend assets found in workspace"
+                elif is_flutter_plugin and not has_flutter:
+                    reason = "Flutter plugin installed, but no pubspec.yaml found in workspace"
+                elif is_firebase_plugin and not has_firebase:
+                    reason = "Firebase plugin installed, but no firebase.json / .firebaserc found in workspace"
+                elif is_android_plugin and not has_android:
+                    reason = "Android CLI plugin installed, but no Android/Gradle manifests found"
+                elif is_docker_plugin and not has_docker:
+                    reason = "Cloud Run plugin installed, but no Dockerfile / docker-compose.yml found in workspace"
+                elif is_antigravity_plugin and not (has_python and any(kw in safe_read(os.path.join(proj_dir, "pyproject.toml")).lower() for kw in ["antigravity", "gemini"])):
+                    reason = "Antigravity SDK plugin installed, but no Antigravity dependencies or agents found"
+                else:
+                    reason = f"Plugin '{p['name']}' does not match any currently active technology in this workspace"
+        else:
+            # Soft mode: conservative retention, only flag clear negative contradictions
+            if is_flutter_plugin and not has_flutter:
+                is_orphaned = True
+                reason = "Flutter plugin installed but no pubspec.yaml found in workspace"
+            elif is_firebase_plugin and not has_firebase:
+                is_orphaned = True
+                reason = "Firebase plugin installed but no firebase.json / .firebaserc found in workspace"
+            elif is_android_plugin and not has_android:
+                is_orphaned = True
+                reason = "Android CLI plugin installed but no Android/Gradle manifests found"
+            elif is_docker_plugin and not has_docker:
+                is_orphaned = True
+                reason = "Cloud Run plugin installed but no Dockerfile / docker-compose.yml found"
 
         if is_orphaned:
             candidate = {
@@ -1076,6 +1234,7 @@ def sweep_project(
         "additions_recommended": additions,
         "provisioned_additions": provisioned_additions,
         "auto_add_enabled": final_auto_add,
+        "pruning_mode": final_pruning_mode,
         "pruning_candidates": pruning_candidates,
         "pruned_items": pruned_items,
         "suggest_pruning_enabled": final_suggest_pruning,
@@ -1224,6 +1383,9 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     lines.append("  QUARTERMASTER SWEEP AUDIT REPORT")
     lines.append(f"  Target Workspace: {swp.get('project_path')}")
     lines.append(f"  Skills Library: {swp.get('library_path')}")
+    p_mode = swp.get("pruning_mode", "aggressive").capitalize()
+    strat_desc = "Strict Stack Alignment" if p_mode == "Aggressive" else "Conservative Retention"
+    lines.append(f"  Pruning Strategy: {p_mode} ({strat_desc})")
     lines.append("=" * 80)
 
     i_plugins = swp.get("installed_plugins", [])
@@ -1264,12 +1426,12 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
 
     candidates = swp.get("pruning_candidates", [])
     if candidates:
-        lines.append(f"\n[Suggested Unneeded Capabilities to Remove ({len(candidates)})]")
+        lines.append(f"\n[Suggested Unneeded Capabilities to Remove ({len(candidates)})] (Strategy: {p_mode})")
         for pr in candidates:
             lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30}")
             lines.append(f"      Note: {pr['reason']}")
     elif not pruned and swp.get("suggest_pruning_enabled"):
-        lines.append("\n[Suggested Unneeded Capabilities to Remove (0)]")
+        lines.append(f"\n[Suggested Unneeded Capabilities to Remove (0)] (Strategy: {p_mode})")
         lines.append("  (No obsolete or unneeded capabilities detected)")
 
     lines.append("\n" + "=" * 80)
@@ -1279,6 +1441,8 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
         lines.append("Status: New capabilities detected. Run /quartermaster sweep to equip.")
     else:
         lines.append("Status: Workspace armory is fully aligned and up to date.")
+    if candidates and not pruned:
+        lines.append("Note: To auto-remove suggested unneeded tools, run /quartermaster sweep --auto-prune or toggle auto-prune in /quartermaster config.")
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1356,6 +1520,16 @@ def main() -> int:
         "--no-prune",
         action="store_true",
         help="In sweep mode, suppress pruning suggestions (additions only).",
+    )
+    parser.add_argument(
+        "--aggressive",
+        action="store_true",
+        help="In sweep mode, enforce strict stack alignment (flag all installed tools not matched by current stack).",
+    )
+    parser.add_argument(
+        "--soft",
+        action="store_true",
+        help="In sweep mode, use conservative retention (preserve auxiliary or cross-cutting tools).",
     )
     parser.add_argument(
         "--no-auto-add",
@@ -1466,6 +1640,11 @@ def main() -> int:
             suggest_prune = False if args.no_prune else None
             auto_p = True if args.auto_prune else None
             auto_a = False if args.no_auto_add else None
+            p_mode = None
+            if args.aggressive:
+                p_mode = "aggressive"
+            elif args.soft:
+                p_mode = "soft"
 
             swp_res = sweep_project(
                 project_path=args.sweep,
@@ -1473,6 +1652,7 @@ def main() -> int:
                 auto_add=auto_a,
                 suggest_pruning=suggest_prune,
                 auto_prune=auto_p,
+                pruning_mode=p_mode,
             )
             if args.json:
                 print(json.dumps(swp_res, indent=2))

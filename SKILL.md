@@ -128,6 +128,8 @@ When code evolves or dependencies are added/removed, the user triggers `/quarter
 python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --sweep <project_path>
 ```
 Flags supported:
+- `/quartermaster sweep --aggressive`: Strict stack alignment (default). Flags any installed tools not matched by current tech manifests.
+- `/quartermaster sweep --soft`: Conservative retention. Preserves cross-cutting or auxiliary tools unless explicit conflicts occur.
 - `/quartermaster sweep --auto-prune`: Runs the sweep and automatically deletes unneeded tools from `.agents/`.
 - `/quartermaster sweep --no-prune`: Suppresses removal suggestions (additions only).
 - `/quartermaster sweep --no-auto-add`: Dry run; lists recommendations without automatically equipping them.
@@ -140,10 +142,12 @@ Flags supported:
    - Never print bash commands like `python3 quartermaster.py --provision ...` to the user.
    - Simply confirm to the user what was automatically equipped and active in `.agents/`.
 4. **Pruning Governance**:
-   - Evaluates whether installed stack tools have lost their underlying manifests.
+   - Evaluates installed stack capabilities according to the configured `pruning-mode`:
+     - **Aggressive (Default)**: Strict stack alignment. Flags any tool whose associated technology is not actively present in the workspace. Because the central library is local and instant, there is zero penalty to removing unused tools; they can be auto-equipped back in milliseconds if needed later.
+     - **Soft**: Conservative retention. Preserves cross-cutting tools (e.g. web devtools or design craft) unless hard manifest contradictions exist.
    - If `auto-prune` is enabled (`true`), deletes them automatically from `.agents/`.
    - If `suggest-pruning` is enabled (`true`, default), lists them as removal recommendations so the developer can decide.
-   - Core AI-SDLC skills are never marked for pruning.
+   - Core AI-SDLC skills (`spec`, `pr-review`, `preflight`, `wayfinder`) are permanent guardrails and are never marked for pruning.
 
 ---
 
@@ -191,6 +195,7 @@ Settings keys:
 - `auto-add`: Boolean (`true` / `false`), controls whether newly matching tools are automatically provisioned into `.agents/` during sweeps (default: `true`).
 - `suggest-pruning`: Boolean (`true` / `false`), controls whether unneeded skills are suggested for removal during sweeps (default: `true`).
 - `auto-prune`: Boolean (`true` / `false`), controls whether unneeded skills are deleted automatically during sweeps (default: `false`).
+- `pruning-mode`: String (`aggressive` / `soft`), controls pruning strategy: strict stack alignment vs conservative retention (default: `aggressive`).
 
 ---
 
