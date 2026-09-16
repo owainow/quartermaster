@@ -201,4 +201,4 @@ To keep workspaces continuously outfitted as code evolves:
 Use the Antigravity `schedule` tool or `/schedule` to set up a recurring daily cron job:
 - **CronExpression**: `"0 9 * * *"` (daily at 9:00 AM)
 - **IsDaemon**: `true`
-- **Prompt**: `"Run Quartermaster background sweep for <project_path> using python3 ~/quartermaster/scripts/quartermaster.py --sweep <project_path> --json and notify if additions or pruning recommendations are detected."`
+- **Prompt**: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`

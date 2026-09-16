@@ -8,10 +8,10 @@ Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps 
 
 <br />
 
-[![Python 3](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success.svg?style=flat-square)](#)
-[![Scope](https://img.shields.io/badge/scope-project--isolated-orange.svg?style=flat-square)](#)
 [![Platform](https://img.shields.io/badge/platform-Antigravity-purple.svg?style=flat-square)](#)
+[![Surface](https://img.shields.io/badge/surface-slash--commands-blue.svg?style=flat-square)](#)
+[![Scope](https://img.shields.io/badge/scope-project--isolated-orange.svg?style=flat-square)](#)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success.svg?style=flat-square)](#)
 
 </div>
 
@@ -39,9 +39,9 @@ flowchart LR
 
 ---
 
-## Slash Commands (Chat-First Experience)
+## Slash Commands
 
-Because Quartermaster is an Antigravity skill, you drive it directly from your agent chat with slash commands. No need to switch to a terminal or remember Python script arguments.
+Quartermaster is an Antigravity skill designed to be driven directly from your agent chat. You never have to switch to a terminal or run manual scripts.
 
 | Slash Command | What It Does |
 | :--- | :--- |
@@ -51,19 +51,30 @@ Because Quartermaster is an Antigravity skill, you drive it directly from your a
 | **`/quartermaster catalog`** | Browses all available capabilities in your central armory |
 | **`/quartermaster config`** | Checks or updates your library path and pruning settings |
 
-### 1. Onboard a Project: `/quartermaster`
-Type `/quartermaster` in your chat. Quartermaster immediately inspects your repo manifests (`package.json`, `pubspec.yaml`, `pyproject.toml`, `Dockerfile`, etc.), presents matching capabilities, and outfits `.agents/` with only what your stack requires.
+---
 
-Starting from an empty folder? Choose **"I'm not sure yet"** during scoping to equip universal Core AI-SDLC guardrails (specifications, adversarial review, sanity checks) without premature framework clutter.
+### 1. Onboard a Project: `/quartermaster`
+
+Type `/quartermaster` in your chat. Quartermaster inspects your project manifests (`package.json`, `pubspec.yaml`, `pyproject.toml`, `Dockerfile`, etc.), presents matching capabilities from your central library, and outfits `.agents/` with only what your stack needs.
+
+Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quartermaster equips universal Core AI-SDLC guardrails (specifications, adversarial review, and preflight sanity checks) without guessing frameworks prematurely.
+
+---
 
 ### 2. Audit and Tidy Up: `/quartermaster sweep`
-Codebases change. Run `/quartermaster sweep` at any time to:
-- Detect newly added dependencies in your project and recommend matching tools from your armory.
-- Highlight unneeded tools whose manifests were removed so your prompts stay lean.
-- Use `/quartermaster sweep --auto-prune` to automatically delete unneeded tools.
-- Use `/quartermaster sweep --no-prune` to review additions only.
+
+Codebases change as you build. Run `/quartermaster sweep` at any time to:
+- Detect newly added dependencies in your project and recommend matching tools from your central library.
+- Highlight unneeded tools whose manifests were removed so your agent prompts stay lean.
+
+Flags supported:
+- `/quartermaster sweep --auto-prune`: Runs the sweep and automatically uninstalls unneeded tools from `.agents/`.
+- `/quartermaster sweep --no-prune`: Reviews additions only and suppresses removal suggestions.
+
+---
 
 ### 3. Add Skills Without Breaking Flow: `/quartermaster import <git-url>`
+
 Found an interesting agent skill or plugin on GitHub? Just paste it into chat:
 
 ```text
@@ -72,11 +83,20 @@ Found an interesting agent skill or plugin on GitHub? Just paste it into chat:
 
 Quartermaster clones the repository straight into your central library (`~/.gemini/skills-library`), discovers all skills and plugins inside, and makes it available to provision into any project immediately.
 
+---
+
 ### 4. Explore Available Capabilities: `/quartermaster catalog`
-Want to see what tools are in your armory? Run `/quartermaster catalog` to view a breakdown of every skill and plugin in your library, categorized by package and classified as either Core AI-SDLC or Stack-specific.
+
+Want to see what tools are in your armory? Run `/quartermaster catalog` in chat to view a breakdown of every skill and plugin in your library, grouped by package and classified as either Core AI-SDLC or Stack-specific.
+
+---
 
 ### 5. Check or Change Settings: `/quartermaster config`
-Inspect your active settings or change your central library path and pruning preferences directly from chat.
+
+Type `/quartermaster config` in chat to inspect your active settings or update:
+- `skills-library`: The folder where all your skills and plugins are stored (default: `~/.gemini/skills-library`).
+- `suggest-pruning`: Whether sweeps recommend removing unneeded tools (default: `true`).
+- `auto-prune`: Whether sweeps automatically delete unneeded tools without asking (default: `false`).
 
 ---
 
@@ -112,55 +132,11 @@ Running a sweep audits your current `.agents/` folder against your code:
 
 You can keep your project workspace continuously optimized by running a background sweep once a day.
 
-Use the Antigravity `/schedule` command in chat to register a recurring daily cron job:
+Use the Antigravity `/schedule` command in chat to register a recurring daily sweep:
 - **Schedule**: `0 9 * * *` (daily at 9:00 AM)
-- **Prompt**: `"Run Quartermaster background sweep using python3 ~/quartermaster/scripts/quartermaster.py --sweep . --json and notify if additions or pruning recommendations are detected."`
+- **Prompt**: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
 
 If no changes are detected, it finishes silently. If newly added packages or unneeded tools are found, it alerts you with a quick summary.
-
----
-
-## Settings & Configuration
-
-Settings are saved globally in `~/.gemini/quartermaster/config.json`. You can manage them via chat with `/quartermaster config` or via the CLI:
-
-```bash
-# View active settings
-python3 scripts/quartermaster.py --config
-
-# Check your central skills library path
-python3 scripts/quartermaster.py --config-get skills-library
-
-# Set a custom library location
-python3 scripts/quartermaster.py --config-set skills-library /path/to/my-library
-
-# Enable auto-pruning during sweeps
-python3 scripts/quartermaster.py --config-set auto-prune true
-
-# Suppress pruning suggestions by default
-python3 scripts/quartermaster.py --config-set suggest-pruning false
-```
-
----
-
-## Headless CLI & Automation Engine
-
-While Quartermaster is built to be driven through slash commands inside chat, the underlying Python script runs on any machine with pure Python 3 and zero external dependencies. This makes it ideal for CI/CD pipelines, Docker setup scripts, or terminal workflows:
-
-```bash
-# Scan a project
-python3 scripts/quartermaster.py --scan /path/to/project
-
-# Provision skills or plugins directly
-python3 scripts/quartermaster.py --provision /path/to/project --skills spec,pr-review
-python3 scripts/quartermaster.py --provision /path/to/project --plugins spark-skills
-
-# Run automated sweep with JSON output
-python3 scripts/quartermaster.py --sweep /path/to/project --json
-
-# Import a repository into the central armory
-python3 scripts/quartermaster.py --import https://github.com/example/cool-skill
-```
 
 ---
 
