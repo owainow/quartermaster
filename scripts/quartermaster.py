@@ -36,6 +36,7 @@ DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "skills-library": DEFAULT_LIBRARY_PATH,
+    "auto-add": True,
     "suggest-pruning": True,
     "auto-prune": False,
 }
@@ -164,18 +165,20 @@ def interactive_config() -> None:
     print(f"Active Config File: {get_active_config_file()}")
     print("\nSettings:")
     print(f"  * skills-library  = {cfg.get('skills-library')}")
+    print(f"  * auto-add        = {cfg.get('auto-add', True)} (automatically provision matching capabilities during sweep)")
     print(f"  * suggest-pruning = {cfg.get('suggest-pruning')} (suggest unneeded skills to remove during sweep)")
     print(f"  * auto-prune      = {cfg.get('auto-prune')} (automatically remove unneeded skills during sweep)")
 
     print("-" * 80)
     print("Options:")
     print("  1. Update 'skills-library' path")
-    print(f"  2. Toggle 'suggest-pruning' (currently: {cfg.get('suggest-pruning')})")
-    print(f"  3. Toggle 'auto-prune' (currently: {cfg.get('auto-prune')})")
-    print("  4. Reset settings to default")
-    print("  5. Exit")
+    print(f"  2. Toggle 'auto-add' (currently: {cfg.get('auto-add', True)})")
+    print(f"  3. Toggle 'suggest-pruning' (currently: {cfg.get('suggest-pruning')})")
+    print(f"  4. Toggle 'auto-prune' (currently: {cfg.get('auto-prune')})")
+    print("  5. Reset settings to default")
+    print("  6. Exit")
 
-    choice = input("\nEnter choice [1-5] (default: 5): ").strip()
+    choice = input("\nEnter choice [1-6] (default: 6): ").strip()
     if choice == "1":
         current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
         new_val = input(f"Enter new skills-library path [{current}]: ").strip()
@@ -190,14 +193,18 @@ def interactive_config() -> None:
             set_config_value("skills-library", expanded)
             print(f"\nUpdated 'skills-library' to: {expanded}")
     elif choice == "2":
+        new_val = not cfg.get("auto-add", True)
+        set_config_value("auto-add", new_val)
+        print(f"\nUpdated 'auto-add' to: {new_val}")
+    elif choice == "3":
         new_val = not cfg.get("suggest-pruning", True)
         set_config_value("suggest-pruning", new_val)
         print(f"\nUpdated 'suggest-pruning' to: {new_val}")
-    elif choice == "3":
+    elif choice == "4":
         new_val = not cfg.get("auto-prune", False)
         set_config_value("auto-prune", new_val)
         print(f"\nUpdated 'auto-prune' to: {new_val}")
-    elif choice == "4":
+    elif choice == "5":
         save_config(dict(DEFAULT_CONFIG))
         print("\nSettings reset to default.")
     else:
@@ -868,6 +875,7 @@ def provision_assets(
 def sweep_project(
     project_path: str,
     library_path: Optional[str] = None,
+    auto_add: Optional[bool] = None,
     suggest_pruning: Optional[bool] = None,
     auto_prune: Optional[bool] = None,
 ) -> Dict[str, Any]:
@@ -875,12 +883,14 @@ def sweep_project(
     Audits the workspace:
     1. Checks active inventory in `.agents/`.
     2. Re-scans manifests and dependencies.
-    3. Recommends newly relevant additions.
+    3. Identifies newly relevant additions:
+       - If auto_add is True (default): automatically provisions them into `.agents/`.
     4. Evaluates unneeded stack tools:
        - If suggest_pruning is True: lists them as removal recommendations.
        - If auto_prune is True: automatically uninstalls them from `.agents/`.
     """
     cfg = load_config()
+    final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
     final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
     final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
 
@@ -940,6 +950,34 @@ def sweep_project(
                 "reason": rec_skill["reason"],
                 "priority": rec_skill.get("priority", "High"),
             })
+
+    # Automatically equip additions when auto_add is active
+    provisioned_additions: List[Dict[str, Any]] = []
+    if final_auto_add and additions:
+        names_to_provision = [a["name"] for a in additions]
+        prov_res = provision_assets(
+            project_path=proj_dir,
+            asset_names=names_to_provision,
+            library_path=library_path,
+        )
+        provisioned_additions = prov_res.get("provisioned", [])
+
+        # Update active lists so current inventory reflects the newly equipped tools
+        for pa in provisioned_additions:
+            if pa["type"] == "plugin":
+                installed_plugins.append({
+                    "name": pa["name"],
+                    "path": pa["destination"],
+                    "type": "plugin",
+                })
+                installed_plugin_names.add(pa["name"].lower())
+            else:
+                installed_skills.append({
+                    "name": pa["name"],
+                    "path": pa["destination"],
+                    "type": "skill",
+                })
+                installed_skill_names.add(pa["name"].lower())
 
     pruning_candidates: List[Dict[str, Any]] = []
     pruned_items: List[Dict[str, Any]] = []
@@ -1036,6 +1074,8 @@ def sweep_project(
         "installed_plugins": installed_plugins,
         "installed_skills": installed_skills,
         "additions_recommended": additions,
+        "provisioned_additions": provisioned_additions,
+        "auto_add_enabled": final_auto_add,
         "pruning_candidates": pruning_candidates,
         "pruned_items": pruned_items,
         "suggest_pruning_enabled": final_suggest_pruning,
@@ -1086,9 +1126,7 @@ def format_catalog_text(catalog: Dict[str, Any]) -> str:
 
     lines.append("")
     lines.append("=" * 80)
-    lines.append("To provision into a project, run:")
-    lines.append("  python3 quartermaster.py --provision <path> --skills <skill1,skill2,...>")
-    lines.append("  python3 quartermaster.py --provision <path> --plugins <plugin1,...>")
+    lines.append("To equip into your project, run /quartermaster or /quartermaster sweep in chat.")
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1142,12 +1180,8 @@ def format_scan_text(scan: Dict[str, Any]) -> str:
             lines.append(f"             Rationale: {r['reason']}")
 
     lines.append("\n" + "=" * 80)
-    quick_items = [p["name"] for p in plugins] + [r["name"] for r in recs[:6]]
-    if quick_items:
-        lines.append("Quick Provision Command:")
-        lines.append(
-            f"  python3 quartermaster.py --provision {scan.get('project_path')} --skills {','.join(quick_items)}"
-        )
+    lines.append("Status: Reconnaissance complete.")
+    lines.append("Run /quartermaster in chat to outfit these capabilities.")
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1202,15 +1236,23 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     if not i_plugins and not i_skills:
         lines.append("  (No skills or plugins currently provisioned in .agents/)")
 
+    prov_additions = swp.get("provisioned_additions", [])
     additions = swp.get("additions_recommended", [])
-    lines.append(f"\n[Recommended New Capabilities to Onboard ({len(additions)})]")
-    if additions:
+
+    if prov_additions:
+        lines.append(f"\n[Auto-Equipped New Capabilities ({len(prov_additions)})]")
+        for pa in prov_additions:
+            t_badge = f"[{pa['type'].upper()}]"
+            lines.append(f"  * + {t_badge} {pa['name']:<30} -> {pa['destination']}")
+    elif additions:
+        lines.append(f"\n[Recommended New Capabilities ({len(additions)})]")
         for a in additions:
             t_badge = "[PLUGIN]" if a["type"] == "plugin" else "[SKILL] "
             p_badge = f"[{a.get('priority', 'High')}]"
             lines.append(f"  * + {t_badge} {a['name']:<30} {p_badge:<10}")
             lines.append(f"      Rationale: {a['reason']}")
     else:
+        lines.append("\n[New Capabilities]")
         lines.append("  (All recommended capabilities for current stack are already provisioned)")
 
     pruned = swp.get("pruned_items", [])
@@ -1231,12 +1273,12 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
         lines.append("  (No obsolete or unneeded capabilities detected)")
 
     lines.append("\n" + "=" * 80)
-    if additions:
-        quick_names = ",".join([a["name"] for a in additions])
-        lines.append("Quick Onboard Command:")
-        lines.append(
-            f"  python3 quartermaster.py --provision {swp.get('project_path')} --skills {quick_names}"
-        )
+    if prov_additions:
+        lines.append(f"Status: Auto-equipped {len(prov_additions)} matching capabilities into .agents/.")
+    elif additions:
+        lines.append("Status: New capabilities detected. Run /quartermaster sweep to equip.")
+    else:
+        lines.append("Status: Workspace armory is fully aligned and up to date.")
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1314,6 +1356,11 @@ def main() -> int:
         "--no-prune",
         action="store_true",
         help="In sweep mode, suppress pruning suggestions (additions only).",
+    )
+    parser.add_argument(
+        "--no-auto-add",
+        action="store_true",
+        help="In sweep mode, do not automatically equip newly recommended capabilities (recommendation only).",
     )
     parser.add_argument(
         "--import",
@@ -1418,10 +1465,12 @@ def main() -> int:
         if args.sweep is not None:
             suggest_prune = False if args.no_prune else None
             auto_p = True if args.auto_prune else None
+            auto_a = False if args.no_auto_add else None
 
             swp_res = sweep_project(
                 project_path=args.sweep,
                 library_path=args.library,
+                auto_add=auto_a,
                 suggest_pruning=suggest_prune,
                 auto_prune=auto_p,
             )

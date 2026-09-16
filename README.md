@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="Quartermaster Logo" width="220" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon_dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/icon.png">
+  <img alt="Quartermaster Logo" src="assets/icon.png" width="130" />
+</picture>
 
 # Quartermaster
 
@@ -79,12 +83,13 @@ Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quarter
 ### 2. Audit and Tidy Up: `/quartermaster sweep`
 
 Codebases change as you build. Run `/quartermaster sweep` at any time to:
-- Detect newly added dependencies in your project and recommend matching tools from your central library.
-- Highlight unneeded tools whose manifests were removed so your agent prompts stay lean.
+- **Auto-Equip New Capabilities**: Because your central skills library is an already-curated collection of tools, Quartermaster **automatically provisions** matching skills and plugins straight into `.agents/` as soon as new dependencies appear in your project.
+- **Highlight Unneeded Tools**: Identifies installed tools whose manifests were removed so your agent prompts stay lean.
 
 Flags supported:
 - `/quartermaster sweep --auto-prune`: Runs the sweep and automatically uninstalls unneeded tools from `.agents/`.
 - `/quartermaster sweep --no-prune`: Reviews additions only and suppresses removal suggestions.
+- `/quartermaster sweep --no-auto-add`: Lists recommendations without automatically installing them (dry run).
 
 ---
 
@@ -110,6 +115,7 @@ Want to see what tools are in your armory? Run `/quartermaster catalog` in chat 
 
 Type `/quartermaster config` in chat to inspect your active settings or update:
 - `skills-library`: The folder where all your skills and plugins are stored (default: `~/.gemini/skills-library`).
+- `auto-add`: Whether sweeps automatically install matching tools into `.agents/` (default: `true`).
 - `suggest-pruning`: Whether sweeps recommend removing unneeded tools (default: `true`).
 - `auto-prune`: Whether sweeps automatically delete unneeded tools without asking (default: `false`).
 
@@ -133,11 +139,12 @@ Starting an empty repo from scratch? Quartermaster asks what kind of software yo
 
 Instead of guessing frameworks prematurely, Quartermaster equips universal Core AI-SDLC guardrails (specifications, adversarial code review, and preflight sanity checks). You get solid engineering fundamentals from day one, and Quartermaster will recommend stack-specific tools once code and manifests appear.
 
-### Intelligent Sweeps & Pruning Governance
+### Intelligent Sweeps & Auto-Equipping
 Running a sweep audits your current `.agents/` folder against your code:
-- **Surfaces new capabilities**: Recommends newly relevant tools from your library when new dependencies are added.
+- **Automatically equips matching tools**: As soon as you add new manifests (`package.json`, `pyproject.toml`, etc.), Quartermaster detects matching tools in your central library and installs them directly into `.agents/`.
 - **Flags unneeded tools**: Identifies installed tools whose dependencies were removed from your code.
-- **Configurable Pruning Settings**:
+- **Configurable Settings**:
+  - `auto-add` (default: `true`): Automatically provisions newly matched tools straight into `.agents/`.
   - `suggest-pruning` (default: `true`): Recommends removing unneeded tools so you can make the call.
   - `auto-prune` (default: `false`): Automatically cleans up unneeded tools during sweeps, keeping your repo tidy with zero friction.
 

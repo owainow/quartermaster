@@ -128,17 +128,22 @@ When code evolves or dependencies are added/removed, the user triggers `/quarter
 python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --sweep <project_path>
 ```
 Flags supported:
-- `/quartermaster sweep --auto-prune`: Executes `quartermaster.py --sweep <project_path> --auto-prune` to automatically delete unneeded capabilities.
-- `/quartermaster sweep --no-prune`: Executes `quartermaster.py --sweep <project_path> --no-prune` to review additions only.
+- `/quartermaster sweep --auto-prune`: Runs the sweep and automatically deletes unneeded tools from `.agents/`.
+- `/quartermaster sweep --no-prune`: Suppresses removal suggestions (additions only).
+- `/quartermaster sweep --no-auto-add`: Dry run; lists recommendations without automatically equipping them.
 
-### What the Sweep Audits:
-1. **Active Project Inventory**: Lists all plugins in `.agents/plugins/` and skills in `.agents/skills/`.
-2. **Stack Changes**: Re-scans manifests and dependencies.
-3. **Recommended Additions**: Identifies newly relevant skills or plugins from the central library not yet provisioned.
-4. **Pruning Candidates**: By default, flags installed stack tools whose underlying manifests are no longer present. Core AI-SDLC skills are never marked for pruning.
-   - If `auto-prune` is enabled (`true`), deletes unneeded tools automatically.
-   - If `suggest-pruning` is enabled (`true`, default), lists them for developer review.
-   - If `suggest-pruning` is disabled (`false`), removal suggestions are suppressed.
+### Automated Actions During Sweep:
+1. **Active Inventory Audit**: Reviews `.agents/plugins/` and `.agents/skills/`.
+2. **Stack Detection**: Re-scans manifests (`package.json`, `pyproject.toml`, etc.).
+3. **Auto-Equip New Additions**:
+   - Because your central skills library is already a trusted, curated armory, Quartermaster **automatically provisions** newly matched tools straight into `.agents/`.
+   - Never print bash commands like `python3 quartermaster.py --provision ...` to the user.
+   - Simply confirm to the user what was automatically equipped and active in `.agents/`.
+4. **Pruning Governance**:
+   - Evaluates whether installed stack tools have lost their underlying manifests.
+   - If `auto-prune` is enabled (`true`), deletes them automatically from `.agents/`.
+   - If `suggest-pruning` is enabled (`true`, default), lists them as removal recommendations so the developer can decide.
+   - Core AI-SDLC skills are never marked for pruning.
 
 ---
 
@@ -173,18 +178,19 @@ Present the discovered packages, plugins, and skills from the central library, c
 When the user asks to view or change settings:
 ```bash
 # View active settings
-python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get skills-library
-python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
-python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get auto-prune
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config --json
 
 # Update a setting
 python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-set <key> <value>
 ```
 
+Present active settings in a clean Markdown table. When the user requests a setting change, execute `--config-set` behind the scenes and confirm the update. Never ask the user to run bash commands.
+
 Settings keys:
 - `skills-library`: Absolute path to central library folder.
-- `suggest-pruning`: Boolean (`true` / `false`), controls whether unneeded skills are suggested for removal during sweeps.
-- `auto-prune`: Boolean (`true` / `false`), controls whether unneeded skills are deleted automatically during sweeps.
+- `auto-add`: Boolean (`true` / `false`), controls whether newly matching tools are automatically provisioned into `.agents/` during sweeps (default: `true`).
+- `suggest-pruning`: Boolean (`true` / `false`), controls whether unneeded skills are suggested for removal during sweeps (default: `true`).
+- `auto-prune`: Boolean (`true` / `false`), controls whether unneeded skills are deleted automatically during sweeps (default: `false`).
 
 ---
 
