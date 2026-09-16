@@ -1,6 +1,6 @@
 ---
 name: quartermaster
-description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster catalog, or /quartermaster config.
+description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster catalog, /quartermaster config, or /quartermaster schedule.
 ---
 
 # Quartermaster: Project Onboarding & Skill Provisioning Armory
@@ -15,11 +15,12 @@ Quartermaster references an external central **skills library** (default: `~/.ge
 
 | Command | Action |
 | :--- | :--- |
-| **`/quartermaster`** | Run 5-stage workspace recon, scoping, and capability provisioning |
+| **`/quartermaster`** | Run 5-stage workspace recon, scoping, capability provisioning, and auto-schedule |
 | **`/quartermaster sweep`** | Audit active tools, recommend additions, and suggest or auto-prune unneeded tools |
 | **`/quartermaster import <git-url>`** | Shallow-clone a skill or plugin git repository directly into your central armory |
 | **`/quartermaster catalog`** | Browse all packages, plugins, and skills available in the central library |
 | **`/quartermaster config`** | View or modify settings (`skills-library`, `suggest-pruning`, `auto-prune`) |
+| **`/quartermaster schedule`** | Automatically register or verify the daily background sweep for this workspace |
 
 ---
 
@@ -32,7 +33,7 @@ flowchart TD
     S1["Stage 1: Workspace Recon"] --> S2["Stage 2: Scoping & Requisitions"]
     S2 --> S3["Stage 3: Armory Review"]
     S3 --> S4["Stage 4: Outfitting (Skills & Plugins)"]
-    S4 --> S5["Stage 5: Verification & Daily Schedule"]
+    S4 --> S5["Stage 5: Verification & Auto-Schedule"]
 ```
 
 ### Stage 1: Workspace Reconnaissance
@@ -40,7 +41,7 @@ flowchart TD
 1. **Identify Workspace Path**: Determine the active project root directory (defaults to current workspace).
 2. **Execute Stack Scan**:
    ```bash
-   python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --scan <project_path> --json
+   python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --scan <project_path> --json
    ```
 3. **Examine Findings**:
    - Check `status`: Is this an active project with manifests, or an `unscoped_new_project`?
@@ -77,7 +78,7 @@ Present the detected technologies and categorize recommendations:
 
 Invite the user to inspect available packages and plugins discovered in the central skills library:
 ```bash
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --catalog
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --catalog
 ```
 Allow the user to select any additional tools they wish to include.
 
@@ -87,7 +88,7 @@ Allow the user to select any additional tools they wish to include.
 
 Once the user confirms their selection, execute the provisioning command:
 ```bash
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py \
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py \
   --provision <project_path> \
   --skills <comma_separated_items>
 ```
@@ -98,7 +99,7 @@ Quartermaster automatically routes:
 
 ---
 
-### Stage 5: Verification & Daily Schedule
+### Stage 5: Verification & Auto-Schedule
 
 1. **Verify Installed Directory Structure**:
    - Check that `.agents/plugins/` contains full plugin bundles.
@@ -108,8 +109,13 @@ Quartermaster automatically routes:
    | :--- | :--- | :--- |
    | `spark-skills` | Plugin | `.agents/plugins/spark-skills/` |
    | `impeccable` | Skill | `.agents/skills/impeccable/` |
-3. **Offer Scheduled Daily Sweep**:
-   - Offer to set up a recurring daily background sweep so new skills are quietly recommended as the project grows.
+3. **Automatically Register Daily Sweep**:
+   - Actively call the `schedule` tool:
+     - `CronExpression`: `"0 9 * * *"`
+     - `IsDaemon`: `true`
+     - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
+   - Confirm to the user:
+     *"Daily sweep scheduled: Quartermaster will run in the background daily at 9:00 AM to keep your workspace outfitted as your codebase evolves."*
 
 ---
 
@@ -119,7 +125,7 @@ When code evolves or dependencies are added/removed, the user triggers `/quarter
 
 ### Execution:
 ```bash
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --sweep <project_path>
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --sweep <project_path>
 ```
 Flags supported:
 - `/quartermaster sweep --auto-prune`: Executes `quartermaster.py --sweep <project_path> --auto-prune` to automatically delete unneeded capabilities.
@@ -145,7 +151,7 @@ When the user pastes a repository URL in chat:
 
 Execute the import engine:
 ```bash
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --import <git_url>
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --import <git_url>
 ```
 
 Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, validates its skill/plugin contents, and reports success back to the user without breaking developer flow.
@@ -156,7 +162,7 @@ Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, valid
 
 When the user runs `/quartermaster catalog`, execute:
 ```bash
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --catalog
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --catalog
 ```
 Present the discovered packages, plugins, and skills from the central library, clearly distinguishing between Core AI-SDLC guardrails and stack-specific tools.
 
@@ -167,12 +173,12 @@ Present the discovered packages, plugins, and skills from the central library, c
 When the user asks to view or change settings:
 ```bash
 # View active settings
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get skills-library
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-get auto-prune
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get skills-library
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-get auto-prune
 
 # Update a setting
-python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --config-set <key> <value>
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --config-set <key> <value>
 ```
 
 Settings keys:
@@ -182,23 +188,12 @@ Settings keys:
 
 ---
 
-## Automated Daily Background Sweeps
+## Command 6: Schedule Daily Sweep (`/quartermaster schedule`)
 
-To keep workspaces continuously outfitted as code evolves:
-- Quartermaster runs the sweep on a daily schedule:
-  ```bash
-  python3 ~/.gemini/skills/quartermaster/scripts/quartermaster.py --sweep <project_path> --json
-  ```
-- **Pruning Governance**:
-  - By default, daily sweeps suggest unneeded skills to remove alongside newly recommended additions.
-  - If `auto-prune` is set to `true`, unneeded tools are automatically removed.
-  - If the user prefers additions only, they can set `suggest-pruning` to `false` or pass `--no-prune`.
-- **Quiet Execution**: If no additions or pruning candidates are found, exits silently.
-- **Discreet Alert**: When changes are detected, delivers a concise notification:
-  > *"Quartermaster Sweep: 1 new tool recommended (`firebase`), 1 unneeded tool flagged for removal (`flutter`). Run `/quartermaster sweep` to review."*
-
-### Registering the Daily Scheduled Task in AGY
-Use the Antigravity `schedule` tool or `/schedule` to set up a recurring daily cron job:
-- **CronExpression**: `"0 9 * * *"` (daily at 9:00 AM)
-- **IsDaemon**: `true`
-- **Prompt**: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
+When the user runs `/quartermaster schedule`:
+1. Actively call the `schedule` tool:
+   - `CronExpression`: `"0 9 * * *"`
+   - `IsDaemon`: `true`
+   - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
+2. Confirm to the user:
+   *"Automated daily sweep is active! Quartermaster will audit this project every morning at 9:00 AM and notify you only if additions or cleanup recommendations are detected."*

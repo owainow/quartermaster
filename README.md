@@ -22,7 +22,7 @@ Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps 
 Install Quartermaster as an Antigravity skill with a single command:
 
 ```bash
-git clone https://github.com/owainow/quartermaster.git ~/.gemini/skills/quartermaster
+git clone https://github.com/owainow/quartermaster.git ~/.gemini/config/skills/quartermaster
 ```
 
 That is it. Antigravity discovers the skill automatically. Open any workspace and type `/quartermaster` in chat to get started.
@@ -62,6 +62,7 @@ Quartermaster is an Antigravity skill designed to be driven directly from your a
 | **`/quartermaster import <git-url>`** | Clones a skill or plugin directly into your central library without breaking flow |
 | **`/quartermaster catalog`** | Browses all available capabilities in your central armory |
 | **`/quartermaster config`** | Checks or updates your library path and pruning settings |
+| **`/quartermaster schedule`** | Sets up or verifies the automated daily sweep for your workspace |
 
 ---
 
@@ -142,13 +143,11 @@ Running a sweep audits your current `.agents/` folder against your code:
 
 ## Automated Daily Sweeps
 
-You can keep your project workspace continuously optimized by running a background sweep once a day.
+Quartermaster keeps your workspace continuously optimized by running in the background once a day.
 
-Use the Antigravity `/schedule` command in chat to register a recurring daily sweep:
-- **Schedule**: `0 9 * * *` (daily at 9:00 AM)
-- **Prompt**: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
-
-If no changes are detected, it finishes silently. If newly added packages or unneeded tools are found, it alerts you with a quick summary.
+- **Set up automatically**: When you onboard a project with `/quartermaster`, the daily sweep is scheduled for you automatically.
+- **On-demand activation**: You can also register or verify the schedule at any time by typing `/quartermaster schedule` in chat.
+- **Quiet by default**: Sweeps run at 9:00 AM every day. If no changes are detected, it finishes silently. If new matching tools or cleanup candidates are found, it alerts you with a quick summary.
 
 ---
 
