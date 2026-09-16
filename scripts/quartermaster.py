@@ -34,7 +34,27 @@ GLOBAL_CONFIG_DIR = os.path.expanduser("~/.gemini/quartermaster")
 GLOBAL_CONFIG_FILE = os.path.join(GLOBAL_CONFIG_DIR, "config.json")
 FALLBACK_CONFIG_FILE = os.path.expanduser("~/.quartermaster/config.json")
 
+CLAUDE_CONFIG_DIR = os.path.expanduser("~/.claude/quartermaster")
+CLAUDE_CONFIG_FILE = os.path.join(CLAUDE_CONFIG_DIR, "config.json")
+
+CODEX_CONFIG_DIR = os.path.expanduser("~/.codex/quartermaster")
+CODEX_CONFIG_FILE = os.path.join(CODEX_CONFIG_DIR, "config.json")
+
+CONFIG_SEARCH_PATHS = [
+    CLAUDE_CONFIG_FILE,
+    CODEX_CONFIG_FILE,
+    GLOBAL_CONFIG_FILE,
+    FALLBACK_CONFIG_FILE,
+]
+
 DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
+
+PROBE_LIBRARY_DIRS = [
+    os.path.expanduser("~/.gemini/skills-library"),
+    os.path.expanduser("~/.claude/skills-library"),
+    os.path.expanduser("~/.agents/skills-library"),
+    os.path.expanduser("~/.quartermaster/skills-library"),
+]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "skills-library": DEFAULT_LIBRARY_PATH,
@@ -43,6 +63,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "auto-prune": False,
     "pruning-mode": "aggressive",
 }
+
+SUPPORTED_HARNESSES = ("agy", "claude", "codex", "universal")
 
 # ==============================================================================
 # Deterministic Core Capability Governance (.core marker file)
@@ -59,15 +81,267 @@ CONVENTIONAL_CORE_NAMES = {
 
 
 # ==============================================================================
+# Multi-Harness Detection & Target Path Resolution
+# ==============================================================================
+
+def detect_harness(project_path: Optional[str] = None, explicit_harness: Optional[str] = None) -> str:
+    """
+    Detects the active agent harness.
+    Precedence:
+    1. Explicit CLI argument (--harness) if not 'auto'
+    2. QUARTERMASTER_HARNESS environment variable
+    3. Filesystem markers in target project or current directory:
+       - .claude/ directory or CLAUDE.md -> 'claude'
+       - .codex/ directory or AGENTS.md -> 'codex'
+       - .agents/ directory -> 'agy'
+    4. Host user environment:
+       - ~/.claude exists and ~/.gemini does not -> 'claude'
+       - ~/.codex exists and ~/.gemini does not -> 'codex'
+    5. Default fallback: 'agy'
+    """
+    if explicit_harness and explicit_harness.lower() != "auto":
+        h = explicit_harness.lower().strip()
+        if h in SUPPORTED_HARNESSES:
+            return h
+
+    env_h = os.environ.get("QUARTERMASTER_HARNESS", "").strip().lower()
+    if env_h in SUPPORTED_HARNESSES:
+        return env_h
+
+    probe_dir = os.path.abspath(os.path.expanduser(project_path)) if project_path else os.getcwd()
+
+    if os.path.exists(os.path.join(probe_dir, ".claude")) or os.path.exists(os.path.join(probe_dir, "CLAUDE.md")):
+        return "claude"
+    if os.path.exists(os.path.join(probe_dir, ".codex")) or os.path.exists(os.path.join(probe_dir, "AGENTS.md")):
+        return "codex"
+    if os.path.exists(os.path.join(probe_dir, ".agents")):
+        return "agy"
+
+    if os.path.exists(os.path.expanduser("~/.gemini")):
+        return "agy"
+    if os.path.exists(os.path.expanduser("~/.claude")):
+        return "claude"
+    if os.path.exists(os.path.expanduser("~/.codex")):
+        return "codex"
+
+    return "agy"
+
+
+def get_harness_target_paths(project_path: str, harness: str) -> Tuple[str, str]:
+    """
+    Returns (skills_dir, plugins_dir) for the given harness.
+    - claude: <project>/.claude/skills and <project>/.claude/plugins
+    - agy / codex / universal: <project>/.agents/skills and <project>/.agents/plugins
+    """
+    proj = os.path.abspath(os.path.expanduser(project_path))
+    if harness == "claude":
+        return (
+            os.path.join(proj, ".claude", "skills"),
+            os.path.join(proj, ".claude", "plugins"),
+        )
+    return (
+        os.path.join(proj, ".agents", "skills"),
+        os.path.join(proj, ".agents", "plugins"),
+    )
+
+
+# ==============================================================================
+# Agent Context Documentation Synchronization (CLAUDE.md / AGENTS.md)
+# ==============================================================================
+
+def sync_claude_md(
+    project_path: str,
+    active_skills: List[Dict[str, Any]],
+    active_plugins: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Maintains an active capabilities table inside <project>/CLAUDE.md between HTML comments:
+    <!-- QUARTERMASTER_START --> and <!-- QUARTERMASTER_END -->.
+    """
+    claude_md_path = os.path.join(project_path, "CLAUDE.md")
+    content = ""
+    if os.path.exists(claude_md_path):
+        try:
+            with open(claude_md_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            content = ""
+
+    start_marker = "<!-- QUARTERMASTER_START -->"
+    end_marker = "<!-- QUARTERMASTER_END -->"
+
+    block_lines = [
+        start_marker,
+        "## Active Project Capabilities (Managed by Quartermaster)",
+        "",
+        "This project is outfitted with project-scoped capabilities.",
+        "",
+        "| Capability | Type | Path | Status |",
+        "| :--- | :--- | :--- | :--- |",
+    ]
+
+    for s in sorted(active_skills, key=lambda x: x["name"]):
+        s_name = s["name"]
+        s_path = s.get("path", f".claude/skills/{s_name}")
+        rel_path = os.path.relpath(s_path, project_path) if os.path.isabs(s_path) else s_path
+        is_core = os.path.exists(os.path.join(s_path, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
+
+    for p in sorted(active_plugins, key=lambda x: x["name"]):
+        p_name = p["name"]
+        p_path = p.get("path", f".claude/plugins/{p_name}")
+        rel_path = os.path.relpath(p_path, project_path) if os.path.isabs(p_path) else p_path
+        is_core = os.path.exists(os.path.join(p_path, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
+
+    if not active_skills and not active_plugins:
+        block_lines.append("| *(None)* | - | - | Run `/quartermaster` to equip capabilities |")
+
+    block_lines.append("")
+    block_lines.append("Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`")
+    block_lines.append(end_marker)
+    new_block = "\n".join(block_lines)
+
+    pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
+    if pattern.search(content):
+        updated = pattern.sub(new_block, content)
+    else:
+        if content.strip():
+            updated = content.rstrip() + "\n\n" + new_block + "\n"
+        else:
+            updated = "# Project Guidelines\n\n" + new_block + "\n"
+
+    try:
+        with open(claude_md_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        return claude_md_path
+    except Exception:
+        return None
+
+
+def sync_agents_md(
+    project_path: str,
+    active_skills: List[Dict[str, Any]],
+    active_plugins: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Maintains an active capabilities table inside <project>/AGENTS.md between HTML comments:
+    <!-- QUARTERMASTER_START --> and <!-- QUARTERMASTER_END -->.
+    """
+    agents_md_path = os.path.join(project_path, "AGENTS.md")
+    content = ""
+    if os.path.exists(agents_md_path):
+        try:
+            with open(agents_md_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            content = ""
+
+    start_marker = "<!-- QUARTERMASTER_START -->"
+    end_marker = "<!-- QUARTERMASTER_END -->"
+
+    block_lines = [
+        start_marker,
+        "## Active Agent Capabilities (Managed by Quartermaster)",
+        "",
+        "This repository uses Quartermaster to manage project-scoped capabilities in `.agents/skills/`.",
+        "",
+        "| Capability | Type | Path | Status |",
+        "| :--- | :--- | :--- | :--- |",
+    ]
+
+    for s in sorted(active_skills, key=lambda x: x["name"]):
+        s_name = s["name"]
+        s_path = s.get("path", f".agents/skills/{s_name}")
+        rel_path = os.path.relpath(s_path, project_path) if os.path.isabs(s_path) else s_path
+        is_core = os.path.exists(os.path.join(s_path, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
+
+    for p in sorted(active_plugins, key=lambda x: x["name"]):
+        p_name = p["name"]
+        p_path = p.get("path", f".agents/plugins/{p_name}")
+        rel_path = os.path.relpath(p_path, project_path) if os.path.isabs(p_path) else p_path
+        is_core = os.path.exists(os.path.join(p_path, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
+
+    if not active_skills and not active_plugins:
+        block_lines.append("| *(None)* | - | - | Mention `$quartermaster` to equip capabilities |")
+
+    block_lines.append("")
+    block_lines.append("Direct Mentions: `$quartermaster`, `$quartermaster sweep`")
+    block_lines.append(end_marker)
+    new_block = "\n".join(block_lines)
+
+    pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
+    if pattern.search(content):
+        updated = pattern.sub(new_block, content)
+    else:
+        if content.strip():
+            updated = content.rstrip() + "\n\n" + new_block + "\n"
+        else:
+            updated = "# Agent Guidelines\n\n" + new_block + "\n"
+
+    try:
+        with open(agents_md_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        return agents_md_path
+    except Exception:
+        return None
+
+
+def sync_project_docs(
+    project_path: str,
+    harness: str,
+    active_skills: Optional[List[Dict[str, Any]]] = None,
+    active_plugins: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Optional[str]]:
+    """
+    Synchronizes project context files (CLAUDE.md, AGENTS.md) based on active harness.
+    """
+    proj = os.path.abspath(os.path.expanduser(project_path))
+    results: Dict[str, Optional[str]] = {}
+
+    if active_skills is None or active_plugins is None:
+        active_skills = []
+        active_plugins = []
+        skills_dir, plugins_dir = get_harness_target_paths(proj, harness)
+        if os.path.exists(skills_dir):
+            for s in sorted(os.listdir(skills_dir)):
+                sp = os.path.join(skills_dir, s)
+                if os.path.isdir(sp) and not s.startswith("."):
+                    active_skills.append({"name": s, "path": sp, "type": "skill"})
+        if os.path.exists(plugins_dir):
+            for p in sorted(os.listdir(plugins_dir)):
+                pp = os.path.join(plugins_dir, p)
+                if os.path.isdir(pp) and not p.startswith("."):
+                    active_plugins.append({"name": p, "path": pp, "type": "plugin"})
+
+    if harness == "claude" or os.path.exists(os.path.join(proj, "CLAUDE.md")):
+        results["claude"] = sync_claude_md(proj, active_skills, active_plugins)
+
+    if harness == "codex" or os.path.exists(os.path.join(proj, "AGENTS.md")):
+        results["codex"] = sync_agents_md(proj, active_skills, active_plugins)
+
+    if harness == "universal":
+        results["claude"] = sync_claude_md(proj, active_skills, active_plugins)
+        results["codex"] = sync_agents_md(proj, active_skills, active_plugins)
+
+    return results
+
+
+# ==============================================================================
 # Configuration & Settings Management
 # ==============================================================================
 
 def get_active_config_file() -> str:
-    """Returns the primary config file path."""
-    if os.path.exists(GLOBAL_CONFIG_FILE):
-        return GLOBAL_CONFIG_FILE
-    if os.path.exists(FALLBACK_CONFIG_FILE):
-        return FALLBACK_CONFIG_FILE
+    """Returns the primary config file path based on existing files."""
+    for p in CONFIG_SEARCH_PATHS:
+        if os.path.exists(p):
+            return p
     return GLOBAL_CONFIG_FILE
 
 
@@ -88,7 +362,7 @@ def load_config() -> Dict[str, Any]:
 
 def save_config(cfg: Dict[str, Any]) -> str:
     """Saves Quartermaster settings to disk."""
-    cfg_file = GLOBAL_CONFIG_FILE
+    cfg_file = get_active_config_file()
     os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
     with open(cfg_file, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
@@ -126,7 +400,8 @@ def resolve_library_path(custom_path: Optional[str] = None) -> str:
     Resolve the active Quartermaster library path:
     1. CLI argument (--library)
     2. Configured 'skills-library' setting
-    3. Default location (~/.gemini/skills-library)
+    3. Existing library in PROBE_LIBRARY_DIRS
+    4. Default location (~/.gemini/skills-library)
     """
     if custom_path:
         expanded = os.path.abspath(os.path.expanduser(custom_path))
@@ -139,6 +414,10 @@ def resolve_library_path(custom_path: Optional[str] = None) -> str:
         expanded = os.path.abspath(os.path.expanduser(configured_lib))
         if os.path.exists(expanded):
             return expanded
+
+    for p in PROBE_LIBRARY_DIRS:
+        if os.path.exists(p):
+            return p
 
     return os.path.abspath(DEFAULT_LIBRARY_PATH)
 
@@ -261,6 +540,7 @@ def import_library_asset(
     project_path: Optional[str] = None,
     force: bool = False,
     is_core: bool = False,
+    harness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Clones a skill or plugin repository directly into the central skills library.
@@ -278,7 +558,8 @@ def import_library_asset(
     in the central library as a standalone skill.
 
     If executed from within an active project (or if project_path is provided),
-    also immediately provisions the imported capability into that project's .agents/.
+    also immediately provisions the imported capability into that project's .claude/skills/
+    or .agents/skills/ depending on the detected harness.
     """
     lib_dir = resolve_library_path(library_path)
     os.makedirs(lib_dir, exist_ok=True)
@@ -323,6 +604,7 @@ def import_library_asset(
     else:
         active_project = find_project_root()
 
+    active_harness = detect_harness(active_project, harness) if active_project else "agy"
     project_provisioned: List[Dict[str, Any]] = []
 
     # CASE 1: Targeted skill extracted from repository
@@ -404,7 +686,7 @@ def import_library_asset(
                     pass
 
             if active_project and os.path.isdir(active_project):
-                proj_skills_dir = os.path.join(active_project, ".agents", "skills")
+                proj_skills_dir, _ = get_harness_target_paths(active_project, active_harness)
                 os.makedirs(proj_skills_dir, exist_ok=True)
                 proj_dest_dir = os.path.join(proj_skills_dir, canonical_name)
                 shutil.copytree(
@@ -429,6 +711,7 @@ def import_library_asset(
                     "files_copied": file_count,
                     "status": "provisioned",
                 })
+                sync_project_docs(active_project, active_harness)
 
             return {
                 "status": status,
@@ -441,6 +724,7 @@ def import_library_asset(
                 "project_path": active_project,
                 "project_provisioned": project_provisioned,
                 "is_core": is_core_asset,
+                "harness": active_harness,
                 "message": message,
             }
 
@@ -492,8 +776,10 @@ def import_library_asset(
             project_path=active_project,
             asset_names=[repo_name],
             library_path=lib_dir,
+            harness=active_harness,
         )
         project_provisioned = prov_res.get("provisioned", [])
+        sync_project_docs(active_project, active_harness)
 
     return {
         "status": status,
@@ -1051,17 +1337,18 @@ def provision_assets(
     asset_names: List[str],
     library_path: Optional[str] = None,
     force_type: Optional[str] = None,
+    harness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Provisions requested assets into `<project_path>/.agents/`.
-    - Full plugins &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
-    - Standalone skills &rarr; `<project_path>/.agents/skills/<skill_name>/`
+    Provisions requested assets into project capability directories:
+    - claude: <project>/.claude/skills/
+    - agy / codex: <project>/.agents/skills/ and <project>/.agents/plugins/
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     os.makedirs(proj_dir, exist_ok=True)
 
-    target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-    target_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
+    active_harness = detect_harness(proj_dir, harness)
+    target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
     catalog = get_catalog(library_path)
     all_skills = catalog.get("skills", [])
@@ -1216,8 +1503,12 @@ def provision_assets(
         if not handled:
             not_found.append(req)
 
+    synced_docs = sync_project_docs(proj_dir, active_harness)
+
     return {
         "project_path": proj_dir,
+        "harness": active_harness,
+        "synced_docs": synced_docs,
         "requested": expanded_requests,
         "provisioned": provisioned,
         "provisioned_count": len(provisioned),
@@ -1236,17 +1527,18 @@ def sweep_project(
     suggest_pruning: Optional[bool] = None,
     auto_prune: Optional[bool] = None,
     pruning_mode: Optional[str] = None,
+    harness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Audits the workspace:
-    1. Checks active inventory in `.agents/`.
+    1. Checks active inventory in project capability directories (.claude/skills/ or .agents/).
     2. Re-scans manifests and dependencies.
     3. Identifies newly relevant additions:
-       - If auto_add is True (default): automatically provisions them into `.agents/`.
+       - If auto_add is True (default): automatically provisions them.
     4. Evaluates unneeded stack tools:
        - Pruning mode can be 'aggressive' (strict stack alignment) or 'soft' (conservative retention).
        - If suggest_pruning is True: lists them as removal recommendations.
-       - If auto_prune is True: automatically uninstalls them from `.agents/`.
+       - If auto_prune is True: automatically uninstalls them.
     """
     cfg = load_config()
     final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
@@ -1263,11 +1555,11 @@ def sweep_project(
         final_pruning_mode = "aggressive"
 
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    active_harness = detect_harness(proj_dir, harness)
     scan = detect_stack(proj_dir, library_path=library_path)
     catalog = get_catalog(library_path)
 
-    target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-    target_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
+    target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
     installed_skills: List[Dict[str, Any]] = []
     if os.path.exists(target_skills_dir):
@@ -1343,6 +1635,7 @@ def sweep_project(
             project_path=proj_dir,
             asset_names=names_to_provision,
             library_path=library_path,
+            harness=active_harness,
         )
         provisioned_additions = prov_res.get("provisioned", [])
 
@@ -1574,8 +1867,12 @@ def sweep_project(
             elif final_suggest_pruning:
                 pruning_candidates.append(candidate)
 
+    synced_docs = sync_project_docs(proj_dir, active_harness, installed_skills, installed_plugins)
+
     return {
         "project_path": proj_dir,
+        "harness": active_harness,
+        "synced_docs": synced_docs,
         "library_path": catalog.get("library_path"),
         "scan_status": scan.get("status"),
         "manifests_found": scan.get("manifests_found", []),
@@ -1625,6 +1922,10 @@ def mark_core(
             os.path.join(proj_dir, ".agents", "skills", norm),
             os.path.join(proj_dir, ".agents", "plugins", name),
             os.path.join(proj_dir, ".agents", "plugins", norm),
+            os.path.join(proj_dir, ".claude", "skills", name),
+            os.path.join(proj_dir, ".claude", "skills", norm),
+            os.path.join(proj_dir, ".claude", "plugins", name),
+            os.path.join(proj_dir, ".claude", "plugins", norm),
         ]
         for t in ws_targets:
             if os.path.isdir(t):
@@ -1707,6 +2008,10 @@ def unmark_core(
             os.path.join(proj_dir, ".agents", "skills", norm),
             os.path.join(proj_dir, ".agents", "plugins", name),
             os.path.join(proj_dir, ".agents", "plugins", norm),
+            os.path.join(proj_dir, ".claude", "skills", name),
+            os.path.join(proj_dir, ".claude", "skills", norm),
+            os.path.join(proj_dir, ".claude", "plugins", name),
+            os.path.join(proj_dir, ".claude", "plugins", norm),
         ]
         for t in ws_targets:
             if os.path.isdir(t):
@@ -1808,39 +2113,47 @@ def list_core(
 
     # From Workspace
     if proj_dir and os.path.exists(proj_dir):
-        ws_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-        if os.path.isdir(ws_skills_dir):
-            for s_name in os.listdir(ws_skills_dir):
-                s_dir = os.path.join(ws_skills_dir, s_name)
-                if os.path.isdir(s_dir) and os.path.exists(os.path.join(s_dir, CORE_MARKER_FILE)):
-                    if s_name in core_items:
-                        core_items[s_name]["in_workspace"] = True
-                    else:
-                        core_items[s_name] = {
-                            "name": s_name,
-                            "type": "skill",
-                            "package": "workspace-local",
-                            "in_library": False,
-                            "in_workspace": True,
-                            "description": "Workspace-local core capability",
-                        }
+        ws_skills_dirs = [
+            os.path.join(proj_dir, ".agents", "skills"),
+            os.path.join(proj_dir, ".claude", "skills"),
+        ]
+        for ws_skills_dir in ws_skills_dirs:
+            if os.path.isdir(ws_skills_dir):
+                for s_name in os.listdir(ws_skills_dir):
+                    s_dir = os.path.join(ws_skills_dir, s_name)
+                    if os.path.isdir(s_dir) and os.path.exists(os.path.join(s_dir, CORE_MARKER_FILE)):
+                        if s_name in core_items:
+                            core_items[s_name]["in_workspace"] = True
+                        else:
+                            core_items[s_name] = {
+                                "name": s_name,
+                                "type": "skill",
+                                "package": "workspace-local",
+                                "in_library": False,
+                                "in_workspace": True,
+                                "description": "Workspace-local core capability",
+                            }
 
-        ws_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
-        if os.path.isdir(ws_plugins_dir):
-            for p_name in os.listdir(ws_plugins_dir):
-                p_dir = os.path.join(ws_plugins_dir, p_name)
-                if os.path.isdir(p_dir) and os.path.exists(os.path.join(p_dir, CORE_MARKER_FILE)):
-                    if p_name in core_items:
-                        core_items[p_name]["in_workspace"] = True
-                    else:
-                        core_items[p_name] = {
-                            "name": p_name,
-                            "type": "plugin",
-                            "package": "workspace-local",
-                            "in_library": False,
-                            "in_workspace": True,
-                            "description": "Workspace-local core capability",
-                        }
+        ws_plugins_dirs = [
+            os.path.join(proj_dir, ".agents", "plugins"),
+            os.path.join(proj_dir, ".claude", "plugins"),
+        ]
+        for ws_plugins_dir in ws_plugins_dirs:
+            if os.path.isdir(ws_plugins_dir):
+                for p_name in os.listdir(ws_plugins_dir):
+                    p_dir = os.path.join(ws_plugins_dir, p_name)
+                    if os.path.isdir(p_dir) and os.path.exists(os.path.join(p_dir, CORE_MARKER_FILE)):
+                        if p_name in core_items:
+                            core_items[p_name]["in_workspace"] = True
+                        else:
+                            core_items[p_name] = {
+                                "name": p_name,
+                                "type": "plugin",
+                                "package": "workspace-local",
+                                "in_library": False,
+                                "in_workspace": True,
+                                "description": "Workspace-local core capability",
+                            }
 
     items_list = sorted(core_items.values(), key=lambda x: (x["type"], x["name"]))
     return {
@@ -1997,15 +2310,20 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     lines.append(f"  Pruning Strategy: {p_mode} ({strat_desc})")
     lines.append("=" * 80)
 
+    harness_label = swp.get("harness", "agy")
+    tgt_desc = ".claude/skills/" if harness_label == "claude" else ".agents/"
+
     i_plugins = swp.get("installed_plugins", [])
     i_skills = swp.get("installed_skills", [])
     lines.append(f"\n[Active Workspace Inventory] ({len(i_plugins)} plugins, {len(i_skills)} skills)")
     for p in i_plugins:
-        lines.append(f"  * [PLUGIN] {p['name']:<30} in .agents/plugins/")
+        p_loc = ".claude/plugins/" if harness_label == "claude" else ".agents/plugins/"
+        lines.append(f"  * [PLUGIN] {p['name']:<30} in {p_loc}")
     for s in i_skills:
-        lines.append(f"  * [SKILL]  {s['name']:<30} in .agents/skills/")
+        s_loc = ".claude/skills/" if harness_label == "claude" else ".agents/skills/"
+        lines.append(f"  * [SKILL]  {s['name']:<30} in {s_loc}")
     if not i_plugins and not i_skills:
-        lines.append("  (No skills or plugins currently provisioned in .agents/)")
+        lines.append(f"  (No skills or plugins currently provisioned in {tgt_desc})")
 
     prov_additions = swp.get("provisioned_additions", [])
     additions = swp.get("additions_recommended", [])
@@ -2030,7 +2348,7 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     if pruned:
         lines.append(f"\n[Auto-Pruned Unneeded Capabilities ({len(pruned)})]")
         for pr in pruned:
-            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30} (removed from .agents/)")
+            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30} (removed from {tgt_desc})")
             lines.append(f"      Note: {pr['reason']}")
 
     candidates = swp.get("pruning_candidates", [])
@@ -2045,7 +2363,7 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
 
     lines.append("\n" + "=" * 80)
     if prov_additions:
-        lines.append(f"Status: Auto-equipped {len(prov_additions)} matching capabilities into .agents/.")
+        lines.append(f"Status: Auto-equipped {len(prov_additions)} matching capabilities into {tgt_desc}.")
     elif additions:
         lines.append("Status: New capabilities detected. Run /quartermaster sweep to equip.")
     else:
@@ -2276,6 +2594,17 @@ def main() -> int:
         help="In import mode, designate the imported capability as Core (.core marker attached).",
     )
     parser.add_argument(
+        "--harness",
+        choices=["agy", "claude", "codex", "universal", "auto"],
+        default="auto",
+        help="Agent harness target: agy, claude, codex, universal, or auto (default: auto).",
+    )
+    parser.add_argument(
+        "--sync-docs",
+        action="store_true",
+        help="Synchronize project agent context documentation (CLAUDE.md / AGENTS.md).",
+    )
+    parser.add_argument(
         "--config",
         action="store_true",
         help="Launch interactive settings configuration or display current configuration.",
@@ -2319,6 +2648,20 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # Context Documentation Sync
+    if args.sync_docs:
+        proj = args.project if args.project else (find_project_root() or os.getcwd())
+        active_h = detect_harness(proj, args.harness)
+        docs = sync_project_docs(proj, active_h)
+        if args.json:
+            print(json.dumps(docs, indent=2))
+        else:
+            print("Synchronized project documentation:")
+            for h, p in docs.items():
+                if p:
+                    print(f"  * [{h.upper()}] {p}")
+        return 0
+
     # Import Git Repo into Central Library & Active Project
     if args.import_url:
         proj_arg = None
@@ -2331,6 +2674,7 @@ def main() -> int:
             project_path=proj_arg,
             force=args.force,
             is_core=args.core,
+            harness=args.harness,
         )
         if args.json:
             print(json.dumps(res, indent=2))
@@ -2436,6 +2780,7 @@ def main() -> int:
                 suggest_pruning=suggest_prune,
                 auto_prune=auto_p,
                 pruning_mode=p_mode,
+                harness=args.harness,
             )
             if args.json:
                 print(json.dumps(swp_res, indent=2))
@@ -2466,6 +2811,7 @@ def main() -> int:
                 asset_names=items,
                 library_path=args.library,
                 force_type=force_type,
+                harness=args.harness,
             )
             if args.json:
                 print(json.dumps(prov_res, indent=2))

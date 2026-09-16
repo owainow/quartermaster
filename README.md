@@ -8,184 +8,168 @@
 
 # Quartermaster
 
-**Smart, project-scoped skill & plugin management for AI coding agents**
+**Smart, project-scoped capability provisioner & skills armory for AI coding agents**
 
-Stop bloating agent prompts with hundreds of global skills. Quartermaster keeps your tools in a central armory and plucks only what your current project needs directly into `.agents/`.
+Stop bloating agent context windows with hundreds of global skills. Quartermaster maintains your tools in a central armory and plucks only the capabilities your active project needs directly into your repository.
 
 <br />
 
-[![Platform](https://img.shields.io/badge/platform-Antigravity-purple.svg?style=flat-square)](#)
-[![Surface](https://img.shields.io/badge/surface-slash--commands-blue.svg?style=flat-square)](#)
-[![Scope](https://img.shields.io/badge/scope-project--isolated-orange.svg?style=flat-square)](#)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success.svg?style=flat-square)](#)
+[![Harnesses](https://img.shields.io/badge/harnesses-Claude%20Code%20%7C%20OpenAI%20Codex%20%7C%20Antigravity-purple.svg?style=flat-square)](#)
+[![Scope](https://img.shields.io/badge/scope-project--scoped-orange.svg?style=flat-square)](#)
+[![Dependencies](https://img.shields.io/badge/dependencies-zero%20pip-success.svg?style=flat-square)](#)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](#)
 
 </div>
 
 ---
 
-## Installation
+## Single-Command Installation from Root
 
-Install Quartermaster as an Antigravity skill with a single command:
+Install Quartermaster with a single command tailored to your agent harness:
 
-```bash
-git clone https://github.com/owainow/quartermaster.git ~/.gemini/config/skills/quartermaster
-```
-
-That is it. Antigravity discovers the skill automatically. Open any workspace and type `/quartermaster` in chat to get started.
+| Agent Harness | Single Installation Command | What It Does |
+| :--- | :--- | :--- |
+| **Anthropic Claude Code** | `./claude/install.sh` | Links to `~/.claude/skills/quartermaster`, enabling `/quartermaster` everywhere across your machine |
+| **OpenAI Codex CLI** | `./codex/install.sh` | Links to `~/.agents/skills/quartermaster`, natively discovered by Codex CLI for `$quartermaster` |
+| **Google Antigravity (AGY)** | `./agy/install.sh` | Links to `~/.gemini/config/skills/quartermaster`, enabling `/quartermaster` in all AGY workspaces |
 
 ---
 
-## Why Quartermaster?
+## Multi-Harness Architecture
 
-When you build with AI coding agents, the default approach is to dump all your skills and plugins into one global folder. That works for the first two days. Then reality catches up:
-
-- **Prompt bloat**: Loading dozens of skills injects thousands of tokens into every conversation turn, slowing down execution and driving up costs.
-- **Tool hallucination**: Agents get confused and reach for tools that make no sense for the current repo, like calling Flutter commands in a Python backend.
-- **Lost in local configs**: Global setups live on one machine. When a teammate clones your repo, they have none of your agent workflows.
-
-Quartermaster flips this model. You install all your skills and plugins into one central library. When you open a project, Quartermaster inspects the codebase and plucks only the relevant capabilities into your project's `.agents/` folder.
-
-Everything is isolated, clean, and checked straight into Git alongside your code.
-
-<br />
+Quartermaster uses a single, shared Python 3 engine (`scripts/quartermaster.py`) with zero external pip dependencies. Dedicated harness adapters interface natively with each agent environment:
 
 ```mermaid
-flowchart LR
-    Lib["Central Skills Library\n(~/.gemini/skills-library)"] -->|"Quartermaster plucks matching tools"| Proj[".agents/ in your project repo"]
-    Repo["Project Code & Manifests\n(package.json, pyproject.toml, etc.)"] -->|"Scans & audits"| Proj
+flowchart TD
+    Central["Central Skills Armory\n(~/.gemini/skills-library or ~/.claude/skills-library)"]
+
+    subgraph Engine["Shared Quartermaster Engine (scripts/quartermaster.py)"]
+        Scan["Stack Recon & Scoping"]
+        CoreGov["Deterministic .core Governance"]
+        PruneGov["Aggressive vs Soft Pruning"]
+        GitImp["Deep Link Git Importer"]
+    end
+
+    Central --> Engine
+
+    Engine -->|"./claude/install.sh"| Claude["Claude Code Harness (claude/)\n• Target: .claude/skills/\n• Slash Command: /quartermaster\n• Context Sync: CLAUDE.md\n• Hooks: hooks/hooks.json"]
+    Engine -->|"./codex/install.sh"| Codex["OpenAI Codex Harness (codex/)\n• Target: .agents/skills/\n• Invocations: $quartermaster\n• Context Sync: AGENTS.md\n• UI Metadata: agents/openai.yaml"]
+    Engine -->|"./agy/install.sh"| AGY["Google Antigravity Harness (agy/)\n• Target: .agents/skills/ & plugins/\n• Slash Command: /quartermaster\n• Native Scheduler: schedule tool"]
 ```
 
 ---
 
-## Slash Commands
+## How It Works in Each Harness
 
-Quartermaster is an Antigravity skill designed to be driven directly from your agent chat. You never have to switch to a terminal or run manual scripts.
+### 1. Anthropic Claude Code (`claude/`)
+- **Invocation**: Type `/quartermaster` or `/quartermaster sweep` directly into chat.
+- **Skill Format**: Follows modern Claude progressive disclosure (`SKILL.md` with `user-invocable: true` and XML structural tags).
+- **Target Location**: Scoped skills are provisioned into `<project>/.claude/skills/<name>/`.
+- **Project Memory (`CLAUDE.md`)**: Automatically writes and maintains an active capabilities table in `<project>/CLAUDE.md`.
+- **SessionStart Hook**: Fast timestamp check (`claude/hooks/session_sweep.py`) alerts developers when codebase dependencies change without background daemon overhead.
+- **Local Plugin Run**: `claude --plugin-dir /path/to/quartermaster/claude`
 
-| Slash Command | What It Does |
+### 2. OpenAI Codex CLI (`codex/`)
+- **Invocation**: Mention `$quartermaster` or `$quartermaster sweep` in your prompt, or ask naturally to audit project skills.
+- **Native Discovery**: The Rust runtime of OpenAI Codex CLI natively scans `.agents/skills/` and `~/.agents/skills/` out of the box.
+- **Target Location**: Scoped skills are provisioned into `<project>/.agents/skills/<name>/`.
+- **Project Instructions (`AGENTS.md`)**: Automatically writes and updates an active capability block in `<project>/AGENTS.md`.
+- **UI & Invocations**: Includes `agents/openai.yaml` for brand color, icon, and display configuration in Codex interfaces.
+
+### 3. Google Antigravity (`agy/`)
+- **Invocation**: Type `/quartermaster` or `/quartermaster sweep` in chat.
+- **Target Location**: Provisions standalone skills into `.agents/skills/` and full plugins into `.agents/plugins/`.
+- **Automated Sweeps**: Registers background daily sweeps using Antigravity's native `schedule` runtime tool (`CronExpression="0 9 * * *"`).
+
+---
+
+## Core Commands
+
+| Command / Mention | Action |
 | :--- | :--- |
-| **`/quartermaster`** | Scans current repo, scopes what you need, and outfits `.agents/` |
-| **`/quartermaster sweep`** | Audits installed tools, recommends new additions, and suggests pruning |
-| **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your project |
-| **`/quartermaster core [add\|remove\|list]`** | Designates or removes Core tools via deterministic `.core` marker files |
-| **`/quartermaster catalog`** | Browses all available capabilities in your central armory |
-| **`/quartermaster config`** | Checks or updates your library path and pruning settings |
+| **`/quartermaster`** or **`$quartermaster`** | Scans project manifests, guides scoping, and provisions capabilities into your repo |
+| **`/quartermaster sweep`** or **`$quartermaster sweep`** | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
+| **`/quartermaster import <git-url>`** | Clones a git repo or extracts a deep skill link into the central armory and active project |
+| **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
+| **`/quartermaster catalog`** | Browses all available capabilities in your central library armory |
+| **`/quartermaster config`** | Views or updates library path, auto-add, and pruning settings |
 | **`/quartermaster schedule`** | Sets up or verifies the automated daily sweep for your workspace |
 
 ---
 
-### 1. Onboard a Project: `/quartermaster`
+## Key Features
 
-Type `/quartermaster` in your chat. Quartermaster inspects your project manifests (`package.json`, `pubspec.yaml`, `pyproject.toml`, `Dockerfile`, etc.), presents matching capabilities from your central library, and outfits `.agents/` with only what your stack needs.
-
-Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quartermaster equips universal Core capabilities (specifications, adversarial code review, and preflight sanity checks) without guessing frameworks prematurely.
-
----
-
-### 2. Audit and Tidy Up: `/quartermaster sweep`
-
-Codebases change as you build. Run `/quartermaster sweep` at any time to:
-- **Auto-Equip New Capabilities**: Because your central skills library is an already-curated collection of tools, Quartermaster **automatically provisions** matching skills and plugins straight into `.agents/` as soon as new dependencies appear in your project.
-- **Highlight Unneeded Tools**: Identifies installed tools whose manifests were removed so your agent prompts stay lean.
-- **Protect Core Guardrails**: Any tool marked with a `.core` file is immune to sweep pruning.
-
-Flags supported:
-- `/quartermaster sweep --aggressive`: Enforces strict stack alignment (default). Flags any installed tools not matched by current tech manifests.
-- `/quartermaster sweep --soft`: Uses conservative retention. Preserves cross-cutting or auxiliary inspection tools.
-- `/quartermaster sweep --auto-prune`: Runs the sweep and automatically uninstalls unneeded tools from `.agents/`.
-- `/quartermaster sweep --no-prune`: Reviews additions only and suppresses removal suggestions.
-- `/quartermaster sweep --no-auto-add`: Lists recommendations without automatically installing them (dry run).
-
----
-
-### 3. Add Skills Without Breaking Flow: `/quartermaster import <git-url>`
-
-Found an interesting agent skill or plugin on GitHub? Just paste its repository URL or a direct link to a skill file into chat:
-
-```text
-/quartermaster import https://github.com/example/awesome-coding-skill
-/quartermaster import https://github.com/owner/repo/blob/main/skills/dependency-upgrade/SKILL.md
-```
-
-Quartermaster performs dual outfitting:
-- **Central Library**: Clones repositories into `~/.gemini/skills-library/` and indexes capabilities. When given a deep link to a specific skill inside a larger repo, Quartermaster extracts that exact skill directly into `~/.gemini/skills-library/<skill-name>/`.
-- **Active Project Outfitting**: If run inside an active project, Quartermaster **automatically provisions** the imported tool straight into `.agents/` (`.agents/plugins/<name>/` for plugins or `.agents/skills/<name>/` for skills). If run outside a project, it imports into the central library only.
-- **Optional Core Marker**: Pass `--core` to mark the imported capability as Core (.core marker attached).
-
----
-
-### 4. Manage Core Guardrails: `/quartermaster core [add|remove|list]`
-
-Quartermaster uses a deterministic `.core` marker file inside skill and plugin folders to identify permanent guardrails. Core capabilities are always auto-equipped on onboarding and are strictly immune to sweep pruning.
-
-- **`/quartermaster core list`**: Displays all active and armory Core capabilities and their protection status.
-- **`/quartermaster core add <name>`**: Designates a tool as Core by placing a `.core` marker file in its folder across your project and library.
-- **`/quartermaster core remove <name>`**: Removes the `.core` marker file so the tool follows standard stack pruning rules.
-
-Conventional workflow tools (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`, `review`) are bootstrapped with `.core` markers automatically.
-
----
-
-### 5. Explore Available Capabilities: `/quartermaster catalog`
-
-Want to see what tools are in your armory? Run `/quartermaster catalog` in chat to view a breakdown of every skill and plugin in your library, grouped by package and classified as either Core or Stack-specific.
-
----
-
-### 6. Check or Change Settings: `/quartermaster config`
-
-Type `/quartermaster config` in chat to inspect your active settings or update:
-- `skills-library`: The folder where all your skills and plugins are stored (default: `~/.gemini/skills-library`).
-- `auto-add`: Whether sweeps automatically install matching tools into `.agents/` (default: `true`).
-- `suggest-pruning`: Whether sweeps recommend removing unneeded tools (default: `true`).
-- `auto-prune`: Whether sweeps automatically delete unneeded tools without asking (default: `false`).
-- `pruning-mode`: Pruning strategy (`aggressive` for strict stack alignment vs `soft` for conservative retention; default: `aggressive`).
-
----
-
-## Core Features
-
-### Central Library with Project-Scoped Plucking
-Collect every skill, plugin, and tool in your central library (`~/.gemini/skills-library`). Quartermaster inspects your project dependencies and plucks only the tools you actually need into `.agents/`. Your agent gets the exact capabilities it needs, and nothing more.
+### Central Library with Scoped Plucking
+Store all your skills and plugins in one central armory (`~/.gemini/skills-library` or `~/.claude/skills-library`). Quartermaster inspects project manifests and plucks only what your active project needs.
 
 ### Deterministic Core Governance (.core Markers)
-Rather than maintaining hardcoded lists of privileged packages, Quartermaster uses a transparent, filesystem-based `.core` marker file in each capability folder. Core tools are auto-equipped on onboarding and are strictly immune to pruning during sweeps. Users can designate any skill or package as Core via `/quartermaster core add <name>`.
+Rather than hardcoding proprietary package lists, Quartermaster uses a transparent, filesystem-based `.core` marker file in each capability directory. Tools marked with `.core` files are permanent guardrails and are strictly immune to pruning during sweeps.
 
-### In-Flow Git Import & Instant Outfitting
-You never have to stop coding or open a terminal window to install new agent capabilities. Paste a Git repository URL directly into your chat, and Quartermaster brings it into your central armory and immediately equips it into your current project.
+Conventional workflow tools (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`) are automatically bootstrapped with `.core` markers. You can designate any capability as Core via `/quartermaster core add <name>`.
 
-### Full Plugins and Standalone Skills
-Different tools come in different shapes. Quartermaster handles both automatically:
-- **Standalone Skills**: Single-focus capabilities copied into `.agents/skills/<name>/`.
-- **Full Plugins**: Complete bundles containing skills, rules, lifecycle hooks, and MCP configurations copied into `.agents/plugins/<name>/`.
+### In-Flow Git Import & Deep Link Extraction
+Paste a Git URL directly into chat without breaking flow:
+```text
+/quartermaster import https://github.com/example/cool-skill
+/quartermaster import https://github.com/owner/repo/blob/main/skills/dependency-upgrade/SKILL.md
+```
+Quartermaster handles both full repositories and deep links pointing to individual skills inside monorepos, extracting the targeted skill directly into your central library and active project.
 
 ### Brand-New Projects & "I'm Not Sure Yet"
-Starting an empty repo from scratch? Quartermaster asks what kind of software you want to build. If you haven't decided on a stack, choose **"I'm not sure yet"**.
+Starting an empty project? Choose **"I'm not sure yet"** during scoping. Quartermaster equips universal Core capabilities (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`) without guessing frameworks prematurely. Stack-specific tools remain deferred until code manifests emerge.
 
-Instead of guessing frameworks prematurely, Quartermaster equips universal Core capabilities (specifications, adversarial code review, and preflight sanity checks). You get solid engineering fundamentals from day one, and Quartermaster will recommend stack-specific tools once code and manifests appear.
-
-### Intelligent Sweeps & Pruning Modes
-Running a sweep audits your current `.agents/` folder against your code:
-- **Automatically equips matching tools**: As soon as you add new manifests (`package.json`, `pyproject.toml`, etc.), Quartermaster detects matching tools in your central library and installs them directly into `.agents/`.
-- **Aggressive Pruning (Default)**: Strict stack alignment. If a tool in `.agents/` does not contain a `.core` marker file and does not match active workspace manifests, Quartermaster flags it for removal. Because re-equipping from your local library takes milliseconds, keeping your workspace lean prevents context window pollution and token waste.
-- **Soft Pruning (Optional)**: Conservative retention. Retains cross-cutting or auxiliary tools (such as browser inspection or design polish) unless an explicit manifest contradiction occurs.
-- **Configurable Settings**:
-  - `auto-add` (default: `true`): Automatically provisions newly matched tools straight into `.agents/`.
-  - `pruning-mode` (default: `aggressive`): Toggles between strict stack alignment (`aggressive`) and conservative retention (`soft`).
-  - `suggest-pruning` (default: `true`): Recommends removing unneeded tools so you can make the call.
-  - `auto-prune` (default: `false`): Automatically cleans up unneeded tools during sweeps, keeping your repo tidy with zero friction.
+### Intelligent Sweeps & Pruning Governance
+Codebases evolve. Running a sweep audits your repository capabilities against active manifests:
+- **Auto-Equip New Capabilities**: When you add new frameworks (`package.json`, `pyproject.toml`, `pubspec.yaml`), Quartermaster immediately provisions matching tools from your central armory.
+- **Aggressive Pruning (Default)**: Strict stack alignment. If an installed tool lacks a `.core` marker and no longer matches active manifests, it is flagged for removal. Because re-equipping takes milliseconds, keeping repos lean prevents token waste.
+- **Soft Pruning (Optional)**: Conservative retention. Preserves auxiliary or cross-cutting tools unless an explicit contradiction occurs.
+- **Settings**:
+  - `auto-add` (default: `true`): Automatically installs matching tools.
+  - `pruning-mode` (default: `aggressive`): Toggles between `aggressive` and `soft`.
+  - `suggest-pruning` (default: `true`): Reports removal recommendations.
+  - `auto-prune` (default: `false`): Automatically deletes unneeded non-core tools during sweeps.
 
 ---
 
-## Automated Daily Sweeps
+## Repository Structure
 
-Quartermaster keeps your workspace continuously optimized by running in the background once a day.
-
-- **Set up automatically**: When you onboard a project with `/quartermaster`, the daily sweep is scheduled for you automatically.
-- **On-demand activation**: You can also register or verify the schedule at any time by typing `/quartermaster schedule` in chat.
-- **Quiet by default**: Sweeps run at 9:00 AM every day. If no changes are detected, it finishes silently. If new matching tools or cleanup candidates are found, it alerts you with a quick summary.
+```text
+quartermaster/
+├── README.md                      # Multi-harness documentation & quickstart
+├── scripts/
+│   └── quartermaster.py           # Shared universal Python 3 engine (zero pip dependencies)
+├── assets/                        # Shared logos and icons
+│
+├── agy/                           # Google Antigravity harness
+│   ├── SKILL.md                   # Native AGY skill definition
+│   ├── install.sh                 # Global installer for Antigravity
+│   └── README.md                  # AGY quickstart
+│
+├── claude/                        # Anthropic Claude Code harness
+│   ├── .claude-plugin/
+│   │   └── plugin.json            # Claude Code plugin manifest
+│   ├── skills/
+│   │   └── quartermaster/
+│   │       ├── SKILL.md           # Progressive disclosure skill (user-invocable: true)
+│   │       └── references/        # Detailed on-demand runbooks
+│   ├── hooks/
+│   │   ├── hooks.json             # Lifecycle hook configuration (SessionStart)
+│   │   └── session_sweep.py       # Fast (<20ms) daily sweep check
+│   ├── install.sh                 # Global installer for Claude Code
+│   └── README.md                  # Claude Code quickstart
+│
+└── codex/                         # OpenAI Codex CLI harness
+    ├── SKILL.md                   # Codex-native skill entrypoint
+    ├── agents/
+    │   └── openai.yaml            # Codex UI & invocation policy metadata
+    ├── AGENTS.md                  # Project instructions template
+    ├── config.toml.example        # Example .codex/config.toml
+    ├── install.sh                 # Global installer for Codex CLI
+    └── README.md                  # Codex quickstart
+```
 
 ---
 
 <div align="center">
-Built for modern agentic workflows with Antigravity.
+Built for modern agentic workflows across Claude Code, OpenAI Codex, and Google Antigravity.
 </div>

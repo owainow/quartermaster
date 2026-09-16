@@ -1,0 +1,9 @@
+interface:
+  display_name: "Quartermaster"
+  short_description: "Project-scoped skill and plugin manager"
+  icon_small: "./assets/icon.png"
+  brand_color: "#10A37F"
+  default_prompt: "Use $quartermaster to audit and sweep skills in this repository."
+
+policy:
+  allow_implicit_invocation: true

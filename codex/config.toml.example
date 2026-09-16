@@ -1,0 +1,13 @@
+# Example Codex CLI Configuration (.codex/config.toml or ~/.codex/config.toml)
+
+[skills]
+# Codex CLI natively scans .agents/skills/ and ~/.agents/skills/
+# Additional skill directories can be specified here:
+extra_roots = ["~/.agents/skills"]
+
+[quartermaster]
+# Path to your central capability armory
+skills_library = "~/.gemini/skills-library"
+pruning_mode = "aggressive"
+auto_add = true
+auto_prune = false
