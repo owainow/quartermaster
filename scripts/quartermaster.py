@@ -226,17 +226,65 @@ def interactive_config() -> None:
 
 
 # ==============================================================================
-# In-Flow Library Import via Git URL
+# In-Flow Library Import via Git URL & Project Auto-Outfitting
 # ==============================================================================
+
+def find_project_root(start_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Determines if a directory is within an active project by looking for
+    project markers (.git, .agents, manifests) walking up to the user home or filesystem root.
+    Returns the absolute path to the project root, or None if outside a project.
+    """
+    if start_dir:
+        curr = os.path.abspath(os.path.expanduser(start_dir))
+    else:
+        curr = os.path.abspath(os.getcwd())
+
+    home = os.path.abspath(os.path.expanduser("~"))
+
+    # Never treat user home or filesystem root as a project
+    if curr == home or curr == "/":
+        return None
+
+    markers = {
+        ".git",
+        ".agents",
+        "package.json",
+        "pyproject.toml",
+        "pubspec.yaml",
+        "Cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "requirements.txt",
+        "Pipfile",
+        "setup.py",
+        "firebase.json",
+        "Dockerfile",
+        "docker-compose.yml",
+    }
+
+    probe = curr
+    while probe and probe != home and probe != "/":
+        for m in markers:
+            if os.path.exists(os.path.join(probe, m)):
+                return probe
+        probe = os.path.dirname(probe)
+
+    return None
+
 
 def import_library_asset(
     git_url: str,
     library_path: Optional[str] = None,
+    project_path: Optional[str] = None,
     force: bool = False,
 ) -> Dict[str, Any]:
     """
     Clones a skill or plugin repository directly into the central skills library.
-    Allows developers to expand their armory without breaking flow.
+    If executed from within an active project (or if project_path is provided),
+    also immediately provisions the imported capability into that project's .agents/.
     """
     lib_dir = resolve_library_path(library_path)
     os.makedirs(lib_dir, exist_ok=True)
@@ -247,36 +295,58 @@ def import_library_asset(
         repo_name = repo_name[:-4]
 
     dest_dir = os.path.join(lib_dir, repo_name)
-    if os.path.exists(dest_dir):
-        if not force:
-            return {
-                "status": "exists",
-                "message": f"Asset '{repo_name}' already exists in library: {dest_dir}. Use --force to overwrite.",
-                "name": repo_name,
-                "destination": dest_dir,
-            }
-        shutil.rmtree(dest_dir)
+    already_existed = os.path.exists(dest_dir)
+    status = "installed"
+    message = ""
 
-    cmd = ["git", "clone", "--depth", "1", git_url, dest_dir]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        return {
-            "status": "error",
-            "error": f"Failed to clone repository: {e.stderr or e.stdout}",
-            "git_url": git_url,
-        }
+    if already_existed and not force:
+        status = "exists"
+        message = f"Asset '{repo_name}' already exists in library: {dest_dir}."
+    else:
+        if already_existed and force:
+            shutil.rmtree(dest_dir)
+
+        cmd = ["git", "clone", "--depth", "1", git_url, dest_dir]
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            status = "installed"
+            message = f"Installed '{repo_name}' into central library: {dest_dir}."
+        except subprocess.CalledProcessError as e:
+            return {
+                "status": "error",
+                "error": f"Failed to clone repository: {e.stderr or e.stdout}",
+                "git_url": git_url,
+            }
 
     is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
     skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
 
+    # Determine if we should outfit into an active project
+    active_project = None
+    if project_path:
+        active_project = find_project_root(project_path) or os.path.abspath(os.path.expanduser(project_path))
+    else:
+        active_project = find_project_root()
+
+    project_provisioned: List[Dict[str, Any]] = []
+    if active_project and os.path.isdir(active_project):
+        prov_res = provision_assets(
+            project_path=active_project,
+            asset_names=[repo_name],
+            library_path=lib_dir,
+        )
+        project_provisioned = prov_res.get("provisioned", [])
+
     return {
-        "status": "installed",
+        "status": status,
         "name": repo_name,
         "is_plugin": is_plugin,
         "skills_count": len(skill_files),
         "destination": dest_dir,
         "library_path": lib_dir,
+        "project_path": active_project,
+        "project_provisioned": project_provisioned,
+        "message": message,
     }
 
 
@@ -817,7 +887,12 @@ def provision_assets(
                 seen_destinations.add(dest_dir)
                 os.makedirs(target_plugins_dir, exist_ok=True)
                 src_dir = plugin["source_dir"]
-                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                shutil.copytree(
+                    src_dir,
+                    dest_dir,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                )
 
                 file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                 provisioned.append({
@@ -842,7 +917,12 @@ def provision_assets(
                 seen_destinations.add(dest_dir)
                 os.makedirs(target_skills_dir, exist_ok=True)
                 src_dir = skill["source_dir"]
-                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                shutil.copytree(
+                    src_dir,
+                    dest_dir,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                )
 
                 file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                 provisioned.append({
@@ -866,7 +946,12 @@ def provision_assets(
                     seen_destinations.add(dest_dir)
                     os.makedirs(target_skills_dir, exist_ok=True)
                     src_dir = skill["source_dir"]
-                    shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                    shutil.copytree(
+                        src_dir,
+                        dest_dir,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                    )
                     file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
                     provisioned.append({
                         "name": canonical_name,
@@ -1453,16 +1538,32 @@ def format_import_text(res: Dict[str, Any]) -> str:
     lines.append("=" * 80)
     lines.append("  QUARTERMASTER LIBRARY IMPORT")
     lines.append("=" * 80)
-    if res.get("status") == "installed":
+
+    status = res.get("status")
+    if status in ("installed", "exists"):
         t = "Plugin" if res.get("is_plugin") else "Package/Skill"
-        lines.append(f"Success: Installed {t} '{res.get('name')}' into central library.")
-        lines.append(f"Destination: {res.get('destination')}")
-        lines.append(f"Skills Discovered: {res.get('skills_count')}")
-        lines.append("\nThis capability is now available to be provisioned into any workspace.")
-    elif res.get("status") == "exists":
-        lines.append(f"Notice: {res.get('message')}")
+        if status == "installed":
+            lines.append(f"Central Armory: Installed {t} '{res.get('name')}' into library.")
+            lines.append(f"  * Location: {res.get('destination')}")
+            lines.append(f"  * Skills Discovered: {res.get('skills_count')}")
+        else:
+            lines.append(f"Central Armory: '{res.get('name')}' already exists in library ({res.get('destination')}).")
+
+        proj = res.get("project_path")
+        proj_prov = res.get("project_provisioned", [])
+        if proj and proj_prov:
+            lines.append(f"\nActive Project Outfitting ({proj}):")
+            for p in proj_prov:
+                t_badge = f"[{p['type'].upper()}]"
+                lines.append(f"  * Auto-equipped {t_badge} {p['name']} -> {p['destination']}")
+        elif proj:
+            lines.append(f"\nActive Project ({proj}):")
+            lines.append(f"  * Capability is now available in project.")
+        else:
+            lines.append("\nNote: Import ran outside of an active project workspace. Added to central library only.")
     else:
         lines.append(f"Error: {res.get('error')}")
+
     lines.append("=" * 80)
     return "\n".join(lines)
 
@@ -1540,7 +1641,17 @@ def main() -> int:
         "--import",
         dest="import_url",
         metavar="GIT_URL",
-        help="Clone and install a skill or plugin git repository directly into your central skills library.",
+        help="Clone and install a skill or plugin git repository directly into your central skills library (and active project).",
+    )
+    parser.add_argument(
+        "--project",
+        metavar="PATH",
+        help="Target project directory for provisioning during import or sweep.",
+    )
+    parser.add_argument(
+        "--no-project",
+        action="store_true",
+        help="In import mode, skip project outfitting (import to central library only).",
     )
     parser.add_argument(
         "--force",
@@ -1576,11 +1687,16 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Import Git Repo into Central Library
+    # Import Git Repo into Central Library & Active Project
     if args.import_url:
+        proj_arg = None
+        if not args.no_project:
+            proj_arg = args.project if args.project else find_project_root()
+
         res = import_library_asset(
             git_url=args.import_url,
             library_path=args.library,
+            project_path=proj_arg,
             force=args.force,
         )
         if args.json:

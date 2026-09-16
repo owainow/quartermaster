@@ -65,7 +65,7 @@ Quartermaster is an Antigravity skill designed to be driven directly from your a
 | :--- | :--- |
 | **`/quartermaster`** | Scans current repo, scopes what you need, and outfits `.agents/` |
 | **`/quartermaster sweep`** | Audits installed tools, recommends new additions, and suggests pruning |
-| **`/quartermaster import <git-url>`** | Clones a skill or plugin directly into your central library without breaking flow |
+| **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your project |
 | **`/quartermaster catalog`** | Browses all available capabilities in your central armory |
 | **`/quartermaster config`** | Checks or updates your library path and pruning settings |
 | **`/quartermaster schedule`** | Sets up or verifies the automated daily sweep for your workspace |
@@ -103,7 +103,9 @@ Found an interesting agent skill or plugin on GitHub? Just paste it into chat:
 /quartermaster import https://github.com/example/awesome-coding-skill
 ```
 
-Quartermaster clones the repository straight into your central library (`~/.gemini/skills-library`), discovers all skills and plugins inside, and makes it available to provision into any project immediately.
+Quartermaster performs dual outfitting:
+- **Central Library**: Clones the repository into `~/.gemini/skills-library/` and indexes its capabilities.
+- **Active Project Outfitting**: If run inside an active project, Quartermaster **automatically provisions** the imported tool straight into `.agents/` (`.agents/plugins/<name>/` for plugins or `.agents/skills/<name>/` for skills). If run outside a project, it imports into the central library only.
 
 ---
 
@@ -129,8 +131,8 @@ Type `/quartermaster config` in chat to inspect your active settings or update:
 ### Central Library with Project-Scoped Plucking
 Collect every skill, plugin, and tool in your central library (`~/.gemini/skills-library`). Quartermaster inspects your project dependencies and plucks only the tools you actually need into `.agents/`. Your agent gets the exact capabilities it needs, and nothing more.
 
-### In-Flow Git Import
-You never have to stop coding or open a terminal window to install new agent capabilities. Paste a Git repository URL directly into your chat, and Quartermaster brings it into your armory on the fly.
+### In-Flow Git Import & Instant Outfitting
+You never have to stop coding or open a terminal window to install new agent capabilities. Paste a Git repository URL directly into your chat, and Quartermaster brings it into your central armory and immediately equips it into your current project.
 
 ### Full Plugins and Standalone Skills
 Different tools come in different shapes. Quartermaster handles both automatically:

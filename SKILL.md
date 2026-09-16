@@ -17,7 +17,7 @@ Quartermaster references an external central **skills library** (default: `~/.ge
 | :--- | :--- |
 | **`/quartermaster`** | Run 5-stage workspace recon, scoping, capability provisioning, and auto-schedule |
 | **`/quartermaster sweep`** | Audit active tools, recommend additions, and suggest or auto-prune unneeded tools |
-| **`/quartermaster import <git-url>`** | Shallow-clone a skill or plugin git repository directly into your central armory |
+| **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your active project |
 | **`/quartermaster catalog`** | Browse all packages, plugins, and skills available in the central library |
 | **`/quartermaster config`** | View or modify settings (`skills-library`, `suggest-pruning`, `auto-prune`) |
 | **`/quartermaster schedule`** | Automatically register or verify the daily background sweep for this workspace |
@@ -160,10 +160,13 @@ When the user pastes a repository URL in chat:
 
 Execute the import engine:
 ```bash
-python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --import <git_url>
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --import <git_url> --project <project_path>
 ```
 
-Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, validates its skill/plugin contents, and reports success back to the user without breaking developer flow.
+Quartermaster performs dual action:
+1. **Central Armory**: Clones the repository into `~/.gemini/skills-library/<repo-name>`, discovering and indexing its skills or plugins.
+2. **Active Project Outfitting**: If run from within an active project workspace, Quartermaster **immediately provisions** the imported capability into that project's `.agents/` folder (`.agents/plugins/<name>/` for full plugins or `.agents/skills/<name>/` for standalone skills).
+3. If executed outside an active project, it imports into the central library only. Use `--no-project` to explicitly skip project outfitting.
 
 ---
 
