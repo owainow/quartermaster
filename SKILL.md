@@ -1,27 +1,31 @@
 ---
 name: quartermaster
-description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Use when onboarding a project, provisioning tools, importing skills from git, running /quartermaster, /quartermaster sweep, or /quartermaster import.
+description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster catalog, or /quartermaster config.
 ---
 
 # Quartermaster: Project Onboarding & Skill Provisioning Armory
 
 Quartermaster equips workspaces with project-scoped skills and full plugins tailored to their exact technology stack. Instead of overloading agents with global skills, Quartermaster provisions self-contained capabilities directly into `<workspace>/.agents/skills/` and `<workspace>/.agents/plugins/`, eliminating global token pollution and tool hallucination.
 
-Quartermaster references an external central **skills library** (default: `~/.gemini/skills-library`), which can be configured via interactive settings. All skills and plugins are installed into the central library first, and Quartermaster dynamically plucks only the relevant capabilities into your project.
+Quartermaster references an external central **skills library** (default: `~/.gemini/skills-library`), which can be configured via interactive settings. All skills and plugins live in the central library first, and Quartermaster dynamically plucks only the relevant capabilities into your project.
 
 ---
 
-## Core Operational Modes
+## Slash Commands Quick Reference
 
-Quartermaster operates across four distinct modes:
-1. **Initial Project Onboarding (`/quartermaster`)**: 5-stage setup for active or brand-new projects.
-2. **Interactive Sweep (`/quartermaster sweep`)**: Workspace audit comparing installed capabilities against evolving tech manifests and the armory.
-3. **In-Flow Git Import (`/quartermaster import <git-url>`)**: Clones a skill or plugin repository directly into your central library without breaking developer flow.
-4. **Scheduled Daily Sweep**: Recurring background task that audits dependencies, checks for additions, and suggests or auto-prunes unneeded capabilities based on your configuration.
+| Command | Action |
+| :--- | :--- |
+| **`/quartermaster`** | Run 5-stage workspace recon, scoping, and capability provisioning |
+| **`/quartermaster sweep`** | Audit active tools, recommend additions, and suggest or auto-prune unneeded tools |
+| **`/quartermaster import <git-url>`** | Shallow-clone a skill or plugin git repository directly into your central armory |
+| **`/quartermaster catalog`** | Browse all packages, plugins, and skills available in the central library |
+| **`/quartermaster config`** | View or modify settings (`skills-library`, `suggest-pruning`, `auto-prune`) |
 
 ---
 
-## Mode 1: The 5-Stage Initial Onboarding Workflow
+## Command 1: Initial Project Onboarding (`/quartermaster`)
+
+When the user runs `/quartermaster`, execute the 5-stage onboarding workflow:
 
 ```mermaid
 flowchart TD
@@ -101,48 +105,86 @@ Quartermaster automatically routes:
    - Check that `.agents/skills/` contains standalone skills.
 2. **Present Confirmation Summary**:
    | Capability Name | Type | Destination |
-   |-----------------|------|-------------|
-   | `spark-skills`  | Plugin | `.agents/plugins/spark-skills/` |
-   | `impeccable`    | Skill  | `.agents/skills/impeccable/` |
+   | :--- | :--- | :--- |
+   | `spark-skills` | Plugin | `.agents/plugins/spark-skills/` |
+   | `impeccable` | Skill | `.agents/skills/impeccable/` |
 3. **Offer Scheduled Daily Sweep**:
    - Offer to set up a recurring daily background sweep so new skills are quietly recommended as the project grows.
 
 ---
 
-## Mode 2: Interactive Quartermaster Sweep (`/quartermaster sweep`)
+## Command 2: Project Sweep (`/quartermaster sweep`)
 
-When a project evolves (e.g. new dependencies added or removed), run a sweep:
+When code evolves or dependencies are added/removed, the user triggers `/quartermaster sweep`.
 
+### Execution:
 ```bash
 python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path>
 ```
+Flags supported:
+- `/quartermaster sweep --auto-prune`: Executes `quartermaster.py --sweep <project_path> --auto-prune` to automatically delete unneeded capabilities.
+- `/quartermaster sweep --no-prune`: Executes `quartermaster.py --sweep <project_path> --no-prune` to review additions only.
 
 ### What the Sweep Audits:
 1. **Active Project Inventory**: Lists all plugins in `.agents/plugins/` and skills in `.agents/skills/`.
 2. **Stack Changes**: Re-scans manifests and dependencies.
 3. **Recommended Additions**: Identifies newly relevant skills or plugins from the central library not yet provisioned.
 4. **Pruning Candidates**: By default, flags installed stack tools whose underlying manifests are no longer present. Core AI-SDLC skills are never marked for pruning.
-   - If `auto-prune` is enabled (`true`), Quartermaster deletes unneeded tools automatically.
-   - If `suggest-pruning` is enabled (`true`, default), Quartermaster lists them for review.
+   - If `auto-prune` is enabled (`true`), deletes unneeded tools automatically.
+   - If `suggest-pruning` is enabled (`true`, default), lists them for developer review.
    - If `suggest-pruning` is disabled (`false`), removal suggestions are suppressed.
 
 ---
 
-## Mode 3: In-Flow Git Import (`/quartermaster import <git-url>`)
+## Command 3: In-Flow Git Import (`/quartermaster import <git-url>`)
 
-When you find a new skill or plugin on GitHub, import it directly into your central library without switching context or breaking flow:
+When the user pastes a repository URL in chat:
+```text
+/quartermaster import https://github.com/example/cool-skill
+```
 
+Execute the import engine:
 ```bash
 python3 /Users/owaino/quartermaster/scripts/quartermaster.py --import <git_url>
 ```
 
-Quartermaster shallow-clones the repo into your configured `skills-library` directory, verifies whether it is a standalone skill or multi-tool plugin, and immediately indexes it in the armory catalog.
+Quartermaster clones the repo into `~/.gemini/skills-library/<repo-name>`, validates its skill/plugin contents, and reports success back to the user without breaking developer flow.
 
 ---
 
-## Mode 4: Scheduled Daily Background Sweep
+## Command 4: Browse Catalog (`/quartermaster catalog`)
 
-To keep workspaces outfitted as the codebase evolves:
+When the user runs `/quartermaster catalog`, execute:
+```bash
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --catalog
+```
+Present the discovered packages, plugins, and skills from the central library, clearly distinguishing between Core AI-SDLC guardrails and stack-specific tools.
+
+---
+
+## Command 5: Settings & Config (`/quartermaster config`)
+
+When the user asks to view or change settings:
+```bash
+# View active settings
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get skills-library
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get suggest-pruning
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get auto-prune
+
+# Update a setting
+python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set <key> <value>
+```
+
+Settings keys:
+- `skills-library`: Absolute path to central library folder.
+- `suggest-pruning`: Boolean (`true` / `false`), controls whether unneeded skills are suggested for removal during sweeps.
+- `auto-prune`: Boolean (`true` / `false`), controls whether unneeded skills are deleted automatically during sweeps.
+
+---
+
+## Automated Daily Background Sweeps
+
+To keep workspaces continuously outfitted as code evolves:
 - Quartermaster runs the sweep on a daily schedule:
   ```bash
   python3 /Users/owaino/quartermaster/scripts/quartermaster.py --sweep <project_path> --json
@@ -160,26 +202,3 @@ Use the Antigravity `schedule` tool or `/schedule` to set up a recurring daily c
 - **CronExpression**: `"0 9 * * *"` (daily at 9:00 AM)
 - **IsDaemon**: `true`
 - **Prompt**: `"Run Quartermaster background sweep for <project_path> using python3 ~/quartermaster/scripts/quartermaster.py --sweep <project_path> --json and notify if additions or pruning recommendations are detected."`
-
----
-
-## Configuring Settings
-
-Quartermaster settings are persisted globally in `~/.gemini/quartermaster/config.json`.
-
-```bash
-# View current settings
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config
-
-# Get a setting
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-get skills-library
-
-# Update central library location
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set skills-library /path/to/my-library
-
-# Enable auto-pruning during sweeps (default: false)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set auto-prune true
-
-# Suppress pruning suggestions during sweeps (default: true)
-python3 /Users/owaino/quartermaster/scripts/quartermaster.py --config-set suggest-pruning false
-```
