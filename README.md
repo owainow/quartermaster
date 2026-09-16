@@ -99,15 +99,17 @@ Flags supported:
 
 ### 3. Add Skills Without Breaking Flow: `/quartermaster import <git-url>`
 
-Found an interesting agent skill or plugin on GitHub? Just paste it into chat:
+Found an interesting agent skill or plugin on GitHub? Just paste its repository URL or a direct link to a skill file into chat:
 
 ```text
 /quartermaster import https://github.com/example/awesome-coding-skill
+/quartermaster import https://github.com/owner/repo/blob/main/skills/dependency-upgrade/SKILL.md
 ```
 
 Quartermaster performs dual outfitting:
-- **Central Library**: Clones the repository into `~/.gemini/skills-library/` and indexes its capabilities.
+- **Central Library**: Clones repositories into `~/.gemini/skills-library/` and indexes capabilities. When given a deep link to a specific skill inside a larger repo, Quartermaster extracts that exact skill directly into `~/.gemini/skills-library/<skill-name>/`.
 - **Active Project Outfitting**: If run inside an active project, Quartermaster **automatically provisions** the imported tool straight into `.agents/` (`.agents/plugins/<name>/` for plugins or `.agents/skills/<name>/` for skills). If run outside a project, it imports into the central library only.
+- **Optional Core Marker**: Pass `--core` to mark the imported capability as Core (.core marker attached).
 
 ---
 

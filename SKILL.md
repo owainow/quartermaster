@@ -154,9 +154,10 @@ Flags supported:
 
 ## Command 3: In-Flow Git Import (`/quartermaster import <git-url>`)
 
-When the user pastes a repository URL in chat:
+When the user pastes a repository URL or a direct link to a specific skill in chat:
 ```text
 /quartermaster import https://github.com/example/cool-skill
+/quartermaster import https://github.com/owner/repo/blob/main/skills/dependency-upgrade/SKILL.md
 ```
 
 Execute the import engine:
@@ -165,9 +166,12 @@ python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --import 
 ```
 
 Quartermaster performs dual action:
-1. **Central Armory**: Clones the repository into `~/.gemini/skills-library/<repo-name>`, discovering and indexing its skills or plugins.
+1. **Central Armory**:
+   - For repository URLs, clones the repository into `~/.gemini/skills-library/<repo-name>`.
+   - For direct skill links (GitHub or GitLab `blob`, `tree`, or `raw` URLs), Quartermaster clones into an isolated temporary folder, extracts the targeted skill folder directly into `~/.gemini/skills-library/<skill-name>/`, and indexes it in the armory.
 2. **Active Project Outfitting**: If run from within an active project workspace, Quartermaster **immediately provisions** the imported capability into that project's `.agents/` folder (`.agents/plugins/<name>/` for full plugins or `.agents/skills/<name>/` for standalone skills).
-3. If executed outside an active project, it imports into the central library only. Use `--no-project` to explicitly skip project outfitting.
+3. **Core Flag (`--core`)**: Append `--core` to mark the imported capability as Core (.core marker attached in both library and project).
+4. If executed outside an active project, it imports into the central library only. Use `--no-project` to explicitly skip project outfitting.
 
 ---
 

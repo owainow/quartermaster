@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Configuration Paths
@@ -259,9 +260,23 @@ def import_library_asset(
     library_path: Optional[str] = None,
     project_path: Optional[str] = None,
     force: bool = False,
+    is_core: bool = False,
 ) -> Dict[str, Any]:
     """
     Clones a skill or plugin repository directly into the central skills library.
+    Supports:
+    1. Direct Git repository URLs:
+       https://github.com/owner/repo.git
+    2. Deep GitHub or GitLab blob and tree URLs pointing to a specific skill:
+       https://github.com/owner/repo/blob/main/skills/dependency-upgrade/SKILL.md
+       https://github.com/owner/repo/tree/main/skills/dependency-upgrade
+    3. Raw GitHub URLs:
+       https://raw.githubusercontent.com/owner/repo/main/skills/dependency-upgrade/SKILL.md
+
+    If a specific skill is targeted in a larger repository, Quartermaster extracts
+    that exact skill into `~/.gemini/skills-library/<skill-name>/` so it exists directly
+    in the central library as a standalone skill.
+
     If executed from within an active project (or if project_path is provided),
     also immediately provisions the imported capability into that project's .agents/.
     """
@@ -269,7 +284,168 @@ def import_library_asset(
     os.makedirs(lib_dir, exist_ok=True)
 
     cleaned_url = git_url.strip().rstrip("/")
-    repo_name = os.path.basename(cleaned_url)
+    clone_url = cleaned_url
+    target_subpath: Optional[str] = None
+    target_skill_name: Optional[str] = None
+
+    # Pattern 1: GitHub / GitLab blob or tree URLs
+    gh_match = re.match(
+        r"^(https?://(?:github\.com|gitlab\.com)/[^/]+/[^/]+?)(?:/(?:-|blob|tree)/[^/]+(?:/(.*))?)?$",
+        cleaned_url,
+    )
+    # Pattern 2: raw.githubusercontent.com URLs
+    raw_match = re.match(
+        r"^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.*)$",
+        cleaned_url,
+    )
+
+    if gh_match:
+        base_repo = gh_match.group(1)
+        clone_url = base_repo if base_repo.endswith(".git") else base_repo + ".git"
+        sub = gh_match.group(2) or ""
+        if sub:
+            target_subpath = sub
+    elif raw_match:
+        owner = raw_match.group(1)
+        repo = raw_match.group(2)
+        clone_url = f"https://github.com/{owner}/{repo}.git"
+        target_subpath = raw_match.group(3)
+
+    if target_subpath:
+        parts = [p for p in target_subpath.split("/") if p and p != "SKILL.md"]
+        if parts:
+            target_skill_name = parts[-1]
+
+    # Determine if we should outfit into an active project
+    active_project = None
+    if project_path:
+        active_project = find_project_root(project_path) or os.path.abspath(os.path.expanduser(project_path))
+    else:
+        active_project = find_project_root()
+
+    project_provisioned: List[Dict[str, Any]] = []
+
+    # CASE 1: Targeted skill extracted from repository
+    if target_skill_name:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cmd = ["git", "clone", "--depth", "1", clone_url, tmp_dir]
+            try:
+                subprocess.run(cmd, capture_output=True, text=True, check=True)
+            except subprocess.CalledProcessError as e:
+                return {
+                    "status": "error",
+                    "error": f"Failed to clone repository from {clone_url}: {e.stderr or e.stdout}",
+                    "git_url": git_url,
+                }
+
+            candidate_dirs: List[str] = []
+            if target_subpath:
+                direct_p = os.path.join(tmp_dir, target_subpath)
+                if os.path.isfile(direct_p):
+                    direct_p = os.path.dirname(direct_p)
+                if os.path.isdir(direct_p) and os.path.exists(os.path.join(direct_p, "SKILL.md")):
+                    candidate_dirs.append(direct_p)
+
+            if not candidate_dirs:
+                for root, dirs, files in os.walk(tmp_dir):
+                    if "SKILL.md" in files:
+                        s_name = os.path.basename(root).lower().replace("_", "-")
+                        if s_name == target_skill_name.lower().replace("_", "-"):
+                            candidate_dirs.append(root)
+
+            if not candidate_dirs:
+                all_s = glob.glob(os.path.join(tmp_dir, "**", "SKILL.md"), recursive=True)
+                if all_s:
+                    candidate_dirs.append(os.path.dirname(all_s[0]))
+
+            if not candidate_dirs:
+                return {
+                    "status": "error",
+                    "error": f"No skill definition (SKILL.md) found for '{target_skill_name}' in {clone_url}",
+                    "git_url": git_url,
+                }
+
+            src_skill_dir = candidate_dirs[0]
+            try:
+                with open(os.path.join(src_skill_dir, "SKILL.md"), "r", encoding="utf-8", errors="ignore") as f:
+                    fm = parse_skill_frontmatter(f.read())
+            except Exception:
+                fm = {}
+
+            canonical_name = fm.get("name") or os.path.basename(src_skill_dir)
+            dest_dir = os.path.join(lib_dir, canonical_name)
+            already_existed = os.path.exists(dest_dir)
+
+            if already_existed and not force:
+                status = "exists"
+                message = f"Skill '{canonical_name}' already exists in central library: {dest_dir}."
+            else:
+                if already_existed and force:
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(
+                    src_skill_dir,
+                    dest_dir,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                )
+                status = "installed"
+                message = f"Installed skill '{canonical_name}' into central library: {dest_dir}."
+
+            is_core_asset = (
+                is_core
+                or canonical_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+                or fm.get("core") is True
+            )
+            if is_core_asset:
+                try:
+                    with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                        f.write("# Quartermaster Core Capability\n")
+                except Exception:
+                    pass
+
+            if active_project and os.path.isdir(active_project):
+                proj_skills_dir = os.path.join(active_project, ".agents", "skills")
+                os.makedirs(proj_skills_dir, exist_ok=True)
+                proj_dest_dir = os.path.join(proj_skills_dir, canonical_name)
+                shutil.copytree(
+                    dest_dir,
+                    proj_dest_dir,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                )
+                if is_core_asset:
+                    try:
+                        with open(os.path.join(proj_dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                            f.write("# Quartermaster Core Capability\n")
+                    except Exception:
+                        pass
+                file_count = sum(len(files) for _, _, files in os.walk(proj_dest_dir))
+                project_provisioned.append({
+                    "name": canonical_name,
+                    "type": "skill",
+                    "package": canonical_name,
+                    "tier": "core" if is_core_asset else "stack",
+                    "destination": proj_dest_dir,
+                    "files_copied": file_count,
+                    "status": "provisioned",
+                })
+
+            return {
+                "status": status,
+                "name": canonical_name,
+                "is_plugin": False,
+                "target_skill": canonical_name,
+                "skills_count": 1,
+                "destination": dest_dir,
+                "library_path": lib_dir,
+                "project_path": active_project,
+                "project_provisioned": project_provisioned,
+                "is_core": is_core_asset,
+                "message": message,
+            }
+
+    # CASE 2: Whole repository import (plugin, package, or standalone repo)
+    repo_name = os.path.basename(clone_url)
     if repo_name.endswith(".git"):
         repo_name = repo_name[:-4]
 
@@ -285,7 +461,7 @@ def import_library_asset(
         if already_existed and force:
             shutil.rmtree(dest_dir)
 
-        cmd = ["git", "clone", "--depth", "1", git_url, dest_dir]
+        cmd = ["git", "clone", "--depth", "1", clone_url, dest_dir]
         try:
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             status = "installed"
@@ -300,14 +476,17 @@ def import_library_asset(
     is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
     skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
 
-    # Determine if we should outfit into an active project
-    active_project = None
-    if project_path:
-        active_project = find_project_root(project_path) or os.path.abspath(os.path.expanduser(project_path))
-    else:
-        active_project = find_project_root()
+    is_core_asset = (
+        is_core
+        or repo_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+    )
+    if is_core_asset:
+        try:
+            with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                f.write("# Quartermaster Core Capability\n")
+        except Exception:
+            pass
 
-    project_provisioned: List[Dict[str, Any]] = []
     if active_project and os.path.isdir(active_project):
         prov_res = provision_assets(
             project_path=active_project,
@@ -325,6 +504,7 @@ def import_library_asset(
         "library_path": lib_dir,
         "project_path": active_project,
         "project_provisioned": project_provisioned,
+        "is_core": is_core_asset,
         "message": message,
     }
 
@@ -1892,6 +2072,13 @@ def format_import_text(res: Dict[str, Any]) -> str:
             lines.append(f"  * Skills Discovered: {res.get('skills_count')}")
         else:
             lines.append(f"Central Armory: '{res.get('name')}' already exists in library ({res.get('destination')}).")
+            lines.append(f"  * Skills Available: {res.get('skills_count')}")
+
+        target_s = res.get("target_skill")
+        if target_s:
+            lines.append(f"  * Targeted Capability: {target_s}")
+        if res.get("is_core"):
+            lines.append("  * Core Status: Designated as Core (.core marker attached)")
 
         proj = res.get("project_path")
         proj_prov = res.get("project_provisioned", [])
@@ -2084,6 +2271,11 @@ def main() -> int:
         help="Force overwrite when importing into library.",
     )
     parser.add_argument(
+        "--core",
+        action="store_true",
+        help="In import mode, designate the imported capability as Core (.core marker attached).",
+    )
+    parser.add_argument(
         "--config",
         action="store_true",
         help="Launch interactive settings configuration or display current configuration.",
@@ -2138,6 +2330,7 @@ def main() -> int:
             library_path=args.library,
             project_path=proj_arg,
             force=args.force,
+            is_core=args.core,
         )
         if args.json:
             print(json.dumps(res, indent=2))
