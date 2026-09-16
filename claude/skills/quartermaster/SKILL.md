@@ -5,9 +5,7 @@ version: 1.2.0
 user-invocable: true
 argument-hint: "[sweep | import <url> | core <add|remove|list> | catalog | config | schedule]"
 allowed-tools:
-  - Bash(python3 *)
-  - Bash(git *)
-  - Bash(crontab *)
+  - Bash
   - Read
   - Write
   - Edit
@@ -84,7 +82,7 @@ Ask the developer what they plan to build:
 6. "I'm not sure yet" (Exploring, prototyping, or undecided)
 
 The "I'm not sure yet" Protocol:
-- If the developer chooses "I'm not sure yet", strictly equip universal Core capabilities only (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`).
+- If the developer chooses "I'm not sure yet", strictly equip universal Core capabilities configured in your armory (e.g. marked with `.core` or designated by user).
 - Do NOT guess frameworks or equip stack-specific tools until code manifests emerge.
 - State clearly: "Since project scope is still emerging, I have equipped foundational workflow guardrails. As you create manifests and write code, Quartermaster will suggest matching tech skills via daily sweeps."
 
@@ -120,7 +118,7 @@ Execute a capability audit:
 QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
-python3 "$QM_SCRIPT" --sweep . $ARGUMENTS --harness claude
+python3 "$QM_SCRIPT" --sweep . --harness claude
 ```
 
 Supported flags:
@@ -233,7 +231,7 @@ In Claude Code, background daily sweep alerts are handled by the `SessionStart` 
 <rules>
 1. Never speculate or guess frameworks for empty workspaces. Adhere strictly to the "I'm not sure yet" protocol.
 2. Tools with a `.core` marker file must NEVER be pruned during sweeps.
-3. Keep generated `SKILL.md` bodies concise (<1,500 words). Store extended tables in `references/`.
+3. Keep generated `SKILL.md` bodies concise (<1,500 words).
 4. Always update `<project>/CLAUDE.md` between `<!-- QUARTERMASTER_START -->` and `<!-- QUARTERMASTER_END -->` markers when capabilities change.
 5. Do not use emdashes or en-dashes in any output.
 </rules>

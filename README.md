@@ -27,10 +27,10 @@ Stop bloating agent context windows with hundreds of global skills. Quartermaste
 
 Quartermaster is designed to be driven directly from agent chat:
 
-| Command / Mention | Target Harness | Action |
+| Command | Target Harness | Action |
 | :--- | :--- | :--- |
-| **`/quartermaster`** or **`$quartermaster`** | All | Scans project manifests, guides scoping, and provisions capabilities into your repo |
-| **`/quartermaster sweep`** or **`$quartermaster sweep`** | All | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
+| **`/quartermaster`** | All | Scans project manifests, guides scoping, and provisions capabilities into your repo |
+| **`/quartermaster sweep`** | All | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
 | **`/quartermaster import <git-url>`** | All | Clones a git repo or extracts a deep skill link into the central armory and active project |
 | **`/quartermaster core [add\|remove\|list]`** | All | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
 | **`/quartermaster catalog`** | All | Browses all available capabilities in your central library armory |
@@ -46,7 +46,7 @@ Install Quartermaster with a single command tailored to your agent harness:
 | Agent Harness | Single Installation Command | What It Does |
 | :--- | :--- | :--- |
 | **Anthropic Claude Code** | `./claude/install.sh` | Links to `~/.claude/skills/quartermaster`, enabling `/quartermaster` everywhere across your machine |
-| **OpenAI Codex CLI** | `./codex/install.sh` | Links to `~/.agents/skills/quartermaster`, natively discovered by Codex CLI for `$quartermaster` |
+| **OpenAI Codex CLI** | `./codex/install.sh` | Links to `~/.agents/skills/quartermaster`, natively discovered by Codex CLI for `/quartermaster` |
 | **Google Antigravity (AGY)** | `./agy/install.sh` | Links to `~/.gemini/config/skills/quartermaster`, enabling `/quartermaster` in all AGY workspaces |
 
 ---
@@ -69,7 +69,7 @@ flowchart TD
     Central --> Engine
 
     Engine -->|"./claude/install.sh"| Claude["Claude Code Harness (claude/)\n• Target: .claude/skills/\n• Slash Command: /quartermaster\n• Context Sync: CLAUDE.md\n• Hooks: hooks/hooks.json"]
-    Engine -->|"./codex/install.sh"| Codex["OpenAI Codex Harness (codex/)\n• Target: .agents/skills/\n• Invocations: $quartermaster\n• Context Sync: AGENTS.md\n• Manifest: agents/openai.yaml"]
+    Engine -->|"./codex/install.sh"| Codex["OpenAI Codex Harness (codex/)\n• Target: .agents/skills/\n• Invocations: /quartermaster\n• Context Sync: AGENTS.md\n• Manifest: agents/openai.yaml"]
     Engine -->|"./agy/install.sh"| AGY["Google Antigravity Harness (agy/)\n• Target: .agents/skills/ & plugins/\n• Slash Command: /quartermaster\n• Native Scheduler: schedule tool"]
 ```
 
@@ -86,7 +86,7 @@ flowchart TD
 - **Local Plugin Run**: `claude --plugin-dir /path/to/quartermaster/claude`
 
 ### 2. OpenAI Codex CLI (`codex/`)
-- **Invocation**: Mention `$quartermaster` or `$quartermaster sweep` in your prompt, or ask naturally to audit project skills.
+- **Invocation**: Type `/quartermaster` or `/quartermaster sweep` in chat, or ask naturally to audit project skills.
 - **Native Discovery**: The Rust runtime of OpenAI Codex CLI natively scans `.agents/skills/` and `~/.agents/skills/` out of the box.
 - **Target Location**: Scoped skills are provisioned into `<project>/.agents/skills/<name>/`.
 - **Project Instructions (`AGENTS.md`)**: Automatically writes and updates an active capability block in `<project>/AGENTS.md`.
@@ -152,8 +152,7 @@ quartermaster/
 |   |   `-- plugin.json            # Claude Code plugin manifest
 |   |-- skills/
 |   |   `-- quartermaster/
-|   |       |-- SKILL.md           # Progressive disclosure skill (user-invocable: true)
-|   |       `-- references/        # Detailed on-demand runbooks
+|   |       `-- SKILL.md           # Progressive disclosure skill (user-invocable: true)
 |   |-- hooks/
 |   |   |-- hooks.json             # Lifecycle hook configuration (SessionStart)
 |   |   `-- session_sweep.py       # Fast (<20ms) daily sweep check

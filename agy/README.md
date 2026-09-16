@@ -42,3 +42,4 @@ Quartermaster is operated directly from your Antigravity chat:
 - **"I'm Not Sure Yet" Protocol**: When starting an empty repository without decided tech, equips universal Core capabilities (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`) and defers stack-specific tools until code manifests emerge.
 - **Deterministic Core Governance**: Capabilities marked with `.core` files are permanent guardrails and are strictly immune to sweep pruning.
 - **Aggressive vs Soft Pruning**: Configure strict stack alignment (`aggressive`, default) or conservative retention (`soft`).
+

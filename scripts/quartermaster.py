@@ -70,14 +70,6 @@ SUPPORTED_HARNESSES = ("agy", "claude", "codex", "universal")
 # Deterministic Core Capability Governance (.core marker file)
 # ==============================================================================
 CORE_MARKER_FILE = ".core"
-CONVENTIONAL_CORE_NAMES = {
-    "spec",
-    "pr-review",
-    "pm",
-    "preflight",
-    "wayfinder",
-    "review",
-}
 
 
 # ==============================================================================
@@ -152,13 +144,13 @@ def detect_harness(project_path: Optional[str] = None, explicit_harness: Optiona
 def get_harness_target_paths(project_path: str, harness: str) -> Tuple[str, str]:
     """
     Returns (skills_dir, plugins_dir) for the given harness.
-    - claude: <project>/.claude/skills and <project>/.claude/skills (Claude Code discovers .claude/skills only)
+    - claude: <project>/.claude/skills and "" (Claude Code discovers .claude/skills only)
     - agy / codex / universal: <project>/.agents/skills and <project>/.agents/plugins
     """
     proj = os.path.abspath(os.path.expanduser(project_path))
     if harness == "claude":
         claude_skills = os.path.join(proj, ".claude", "skills")
-        return (claude_skills, claude_skills)
+        return (claude_skills, "")
     return (
         os.path.join(proj, ".agents", "skills"),
         os.path.join(proj, ".agents", "plugins"),
@@ -206,7 +198,7 @@ def sync_claude_md(
         s_path = s.get("path", f".claude/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
         rel_path = os.path.relpath(s_path_full, project_path)
-        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
 
@@ -215,7 +207,7 @@ def sync_claude_md(
         p_path = p.get("path", f".claude/skills/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
         rel_path = os.path.relpath(p_path_full, project_path)
-        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
 
@@ -283,7 +275,7 @@ def sync_agents_md(
         s_path = s.get("path", f".agents/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
         rel_path = os.path.relpath(s_path_full, project_path)
-        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
 
@@ -292,15 +284,15 @@ def sync_agents_md(
         p_path = p.get("path", f".agents/plugins/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
         rel_path = os.path.relpath(p_path_full, project_path)
-        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
 
     if not active_skills and not active_plugins:
-        block_lines.append("| *(None)* | - | - | Mention `$quartermaster` to equip capabilities |")
+        block_lines.append("| *(None)* | - | - | Run `/quartermaster` to equip capabilities |")
 
     block_lines.append("")
-    block_lines.append("Direct Mentions: `$quartermaster`, `$quartermaster sweep`")
+    block_lines.append("Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`")
     block_lines.append(end_marker)
     new_block = "\n".join(block_lines)
 
@@ -339,12 +331,12 @@ def sync_project_docs(
         active_skills = []
         active_plugins = []
         skills_dir, plugins_dir = get_harness_target_paths(proj, harness)
-        if os.path.exists(skills_dir):
+        if skills_dir and os.path.exists(skills_dir):
             for s in sorted(os.listdir(skills_dir)):
                 sp = os.path.join(skills_dir, s)
                 if os.path.isdir(sp) and not s.startswith("."):
                     active_skills.append({"name": s, "path": sp, "type": "skill"})
-        if os.path.exists(plugins_dir):
+        if plugins_dir and os.path.exists(plugins_dir):
             for p in sorted(os.listdir(plugins_dir)):
                 pp = os.path.join(plugins_dir, p)
                 if os.path.isdir(pp) and not p.startswith("."):
@@ -607,7 +599,7 @@ def import_library_asset(
             "git_url": git_url,
         }
 
-    cleaned_url = git_url.strip().rstrip("/")
+    cleaned_url = git_url.strip().split("?")[0].split("#")[0].rstrip("/")
     clone_url = cleaned_url
     target_subpath: Optional[str] = None
     target_skill_name: Optional[str] = None
@@ -727,7 +719,6 @@ def import_library_asset(
 
             is_core_asset = (
                 is_core
-                or canonical_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
                 or fm.get("core") is True
             )
             if is_core_asset:
@@ -826,10 +817,7 @@ def import_library_asset(
     is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
     skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
 
-    is_core_asset = (
-        is_core
-        or repo_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-    )
+    is_core_asset = is_core
     if is_core_asset:
         try:
             with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
@@ -983,19 +971,11 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 
             has_core_file = os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
             is_core_manifest = manifest_data.get("core") is True
-            is_conventional_core_plugin = (
-                plugin_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-                or pkg.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-            )
-            if is_conventional_core_plugin and not has_core_file:
-                try:
-                    with open(os.path.join(pkg_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                        f.write("# Quartermaster Core Capability\n")
-                    has_core_file = True
-                except Exception:
-                    pass
+            p_tier = "core" if (has_core_file or is_core_manifest) else "stack"
 
-            p_tier = "core" if (has_core_file or is_core_manifest or is_conventional_core_plugin) else "stack"
+            plugin_tags = manifest_data.get("tags", [])
+            if not plugin_tags:
+                plugin_tags = [w for w in re.split(r"[-_\s]+", plugin_name.lower()) if len(w) > 2]
 
             plugin_info = {
                 "name": plugin_name,
@@ -1003,6 +983,7 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
                 "tier": p_tier,
                 "version": plugin_version,
                 "description": plugin_desc,
+                "tags": plugin_tags,
                 "source_dir": pkg_dir,
                 "manifest_file": plugin_manifest_path,
                 "components": components,
@@ -1025,27 +1006,15 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             desc = meta.get("description") or "No description available."
             version = meta.get("version")
             tags = meta.get("tags", [])
+            if not tags:
+                tags = [w for w in re.split(r"[-_\s]+", name.lower()) if len(w) > 2]
 
             has_core_file = (
                 os.path.exists(os.path.join(skill_dir, CORE_MARKER_FILE))
                 or os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
             )
             is_core_frontmatter = meta.get("core") is True
-            norm_skill_name = name.lower().replace("_", "-")
-            norm_dir_name = os.path.basename(skill_dir).lower().replace("_", "-")
-            is_conventional_core_skill = (
-                norm_skill_name in CONVENTIONAL_CORE_NAMES
-                or norm_dir_name in CONVENTIONAL_CORE_NAMES
-            )
-            if is_conventional_core_skill and not has_core_file:
-                try:
-                    with open(os.path.join(skill_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                        f.write("# Quartermaster Core Capability\n")
-                    has_core_file = True
-                except Exception:
-                    pass
-
-            s_tier = "core" if (has_core_file or is_core_frontmatter or is_conventional_core_skill) else "stack"
+            s_tier = "core" if (has_core_file or is_core_frontmatter) else "stack"
 
             subdirs = [
                 d for d in os.listdir(skill_dir)
@@ -1146,180 +1115,243 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
         except Exception:
             return ""
 
-    # Flutter / Dart (pubspec.yaml)
-    pubspec_path = os.path.join(proj_dir, "pubspec.yaml")
-    if os.path.exists(pubspec_path):
-        manifests_found.append("pubspec.yaml")
-        content = safe_read(pubspec_path)
-        tech_details = ["Dart"]
-        if "flutter:" in content or "sdk: flutter" in content:
-            tech_details.append("Flutter SDK")
+    # 1. Search directories (root + depth 1 subdirectories for monorepos)
+    search_dirs = [proj_dir]
+    try:
+        for entry in sorted(os.listdir(proj_dir)):
+            ep = os.path.join(proj_dir, entry)
+            if os.path.isdir(ep) and not entry.startswith(".") and entry not in (
+                "node_modules", "target", "build", "dist", ".git", ".venv", "venv", "__pycache__"
+            ):
+                search_dirs.append(ep)
+    except Exception:
+        pass
 
-        technologies.append({
-            "name": "Flutter / Dart",
-            "manifest": "pubspec.yaml",
-            "details": ", ".join(tech_details),
-        })
+    detected_tech_tags: Set[str] = set()
 
-        add_plugin_rec("flutter", "stack", "Flutter architecture, responsive layouts, and Dart unit testing")
-        add_skill_rec("flutter-apply-architecture-best-practices", "flutter", "stack", "Architecture and structure standards for Flutter")
-        add_skill_rec("dart-add-unit-test", "flutter", "core", "Unit test doubles, fixtures, and assertions for Dart")
-        add_skill_rec("flutter-build-responsive-layout", "flutter", "stack", "Responsive layout patterns across devices")
+    for s_dir in search_dirs:
+        rel_prefix = "" if s_dir == proj_dir else f"{os.path.basename(s_dir)}/"
 
-        if "http:" in content or "dio:" in content:
-            add_skill_rec("flutter-use-http-package", "flutter", "stack", "HTTP networking patterns")
-        if "json_annotation:" in content or "json_serializable:" in content:
-            add_skill_rec("flutter-implement-json-serialization", "flutter", "stack", "JSON code generation and serialization")
-        if "go_router:" in content or "auto_route:" in content:
-            add_skill_rec("flutter-setup-declarative-routing", "flutter", "stack", "Declarative routing patterns")
+        # Flutter / Dart (pubspec.yaml)
+        pubspec_path = os.path.join(s_dir, "pubspec.yaml")
+        if os.path.exists(pubspec_path):
+            m_name = f"{rel_prefix}pubspec.yaml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                content = safe_read(pubspec_path)
+                tech_details = ["Dart"]
+                if "flutter:" in content or "sdk: flutter" in content:
+                    tech_details.append("Flutter SDK")
+                technologies.append({
+                    "name": "Flutter / Dart",
+                    "manifest": m_name,
+                    "details": ", ".join(tech_details),
+                    "tags": ["flutter", "dart", "mobile"],
+                })
+                detected_tech_tags.update(["flutter", "dart", "mobile"])
 
-    # Android Native
-    android_dir = os.path.join(proj_dir, "android")
-    has_gradle = (
-        os.path.exists(os.path.join(proj_dir, "build.gradle"))
-        or os.path.exists(os.path.join(proj_dir, "build.gradle.kts"))
-        or (os.path.exists(android_dir) and os.path.isdir(android_dir))
-    )
-    if has_gradle:
-        manifest_name = "android/ or build.gradle"
-        manifests_found.append(manifest_name)
-        technologies.append({
-            "name": "Android Native / Gradle",
-            "manifest": manifest_name,
-            "details": "Android Gradle build system and device tools",
-        })
-        add_plugin_rec("android-cli-plugin", "stack", "Android CLI management, emulators, logcat, and APK builds")
+        # Android Native / Gradle
+        android_dir = os.path.join(s_dir, "android")
+        has_gradle = (
+            os.path.exists(os.path.join(s_dir, "build.gradle"))
+            or os.path.exists(os.path.join(s_dir, "build.gradle.kts"))
+            or (os.path.exists(android_dir) and os.path.isdir(android_dir))
+        )
+        if has_gradle:
+            m_name = f"{rel_prefix}build.gradle"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Android Native / Gradle",
+                    "manifest": m_name,
+                    "details": "Android Gradle build system and device tools",
+                    "tags": ["android", "mobile", "gradle"],
+                })
+                detected_tech_tags.update(["android", "mobile", "gradle"])
 
-    # Node.js / Web / TypeScript (package.json)
-    package_json_path = os.path.join(proj_dir, "package.json")
-    if os.path.exists(package_json_path):
-        manifests_found.append("package.json")
-        content = safe_read(package_json_path)
-        frameworks = []
+        # Apple iOS / Swift
+        has_ios = (
+            os.path.exists(os.path.join(s_dir, "Podfile"))
+            or os.path.exists(os.path.join(s_dir, "Package.swift"))
+            or any(f.endswith(".xcodeproj") or f.endswith(".xcworkspace") for f in os.listdir(s_dir) if os.path.exists(s_dir) and os.path.isdir(s_dir))
+        )
+        if has_ios:
+            m_name = f"{rel_prefix}Package.swift / Xcode"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Apple iOS / Swift",
+                    "manifest": m_name,
+                    "details": "Swift / Xcode project and Apple toolchain",
+                    "tags": ["ios", "swift", "apple", "mobile", "xcode"],
+                })
+                detected_tech_tags.update(["ios", "swift", "apple", "mobile", "xcode"])
 
-        if "react" in content:
-            frameworks.append("React")
-        if "next" in content:
-            frameworks.append("Next.js")
-        if "vue" in content:
-            frameworks.append("Vue")
-        if "svelte" in content:
-            frameworks.append("Svelte")
-        if "tailwind" in content or os.path.exists(os.path.join(proj_dir, "tailwind.config.js")):
-            frameworks.append("Tailwind CSS")
-        if "vite" in content:
-            frameworks.append("Vite")
-        if "express" in content:
-            frameworks.append("Express")
-        if "fastify" in content:
-            frameworks.append("Fastify")
-        if os.path.exists(os.path.join(proj_dir, "tsconfig.json")):
-            frameworks.append("TypeScript")
+        # Node.js / Web / TypeScript (package.json)
+        pkg_json = os.path.join(s_dir, "package.json")
+        if os.path.exists(pkg_json):
+            m_name = f"{rel_prefix}package.json"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                content = safe_read(pkg_json)
+                frameworks = []
+                w_tags = ["web", "frontend", "node", "javascript", "typescript"]
+                if "react" in content:
+                    frameworks.append("React")
+                    w_tags.append("react")
+                if "next" in content:
+                    frameworks.append("Next.js")
+                    w_tags.append("next")
+                if "vue" in content:
+                    frameworks.append("Vue")
+                    w_tags.append("vue")
+                if "svelte" in content:
+                    frameworks.append("Svelte")
+                    w_tags.append("svelte")
+                if "tailwind" in content or os.path.exists(os.path.join(s_dir, "tailwind.config.js")):
+                    frameworks.append("Tailwind CSS")
+                    w_tags.append("tailwind")
+                if "vite" in content:
+                    frameworks.append("Vite")
+                    w_tags.append("vite")
+                if "express" in content:
+                    frameworks.append("Express")
+                if "fastify" in content:
+                    frameworks.append("Fastify")
+                if os.path.exists(os.path.join(s_dir, "tsconfig.json")):
+                    frameworks.append("TypeScript")
 
-        details_str = ", ".join(frameworks) if frameworks else "JavaScript/Node.js"
-        technologies.append({
-            "name": "Web & Node.js Platform",
-            "manifest": "package.json",
-            "details": details_str,
-        })
+                details_str = ", ".join(frameworks) if frameworks else "JavaScript/Node.js"
+                technologies.append({
+                    "name": "Web & Node.js Platform",
+                    "manifest": m_name,
+                    "details": details_str,
+                    "tags": w_tags,
+                })
+                detected_tech_tags.update(w_tags)
 
-        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
-        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
-        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
-    elif os.path.exists(os.path.join(proj_dir, "index.html")):
-        manifests_found.append("index.html")
-        technologies.append({
-            "name": "Static Web / HTML",
-            "manifest": "index.html",
-            "details": "Static HTML/CSS/JavaScript",
-        })
-        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
-        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
-        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
-
-    # Chrome Extension (manifest.json)
-    manifest_json_path = os.path.join(proj_dir, "manifest.json")
-    if os.path.exists(manifest_json_path):
-        content = safe_read(manifest_json_path)
-        if "manifest_version" in content:
-            manifests_found.append("manifest.json")
+        elif os.path.exists(os.path.join(s_dir, "index.html")) and s_dir == proj_dir:
+            manifests_found.append("index.html")
             technologies.append({
-                "name": "Chrome Extension",
-                "manifest": "manifest.json",
-                "details": "Chrome Extension manifest (v2/v3)",
+                "name": "Static Web / HTML",
+                "manifest": "index.html",
+                "details": "Static HTML/CSS/JavaScript",
+                "tags": ["web", "frontend", "html", "css"],
             })
-            add_skill_rec("chrome-extensions", "modern-web-guidance-plugin", "stack", "Chrome extension architecture, permissions, and background workers")
-            add_plugin_rec("chrome-devtools-plugin", "stack", "DevTools inspection of popups and content scripts")
+            detected_tech_tags.update(["web", "frontend", "html", "css"])
 
-    # Firebase (firebase.json, .firebaserc)
-    firebase_json_path = os.path.join(proj_dir, "firebase.json")
-    firebaserc_path = os.path.join(proj_dir, ".firebaserc")
-    if os.path.exists(firebase_json_path) or os.path.exists(firebaserc_path):
-        manifest_name = "firebase.json" if os.path.exists(firebase_json_path) else ".firebaserc"
-        manifests_found.append(manifest_name)
-        technologies.append({
-            "name": "Firebase Platform",
-            "manifest": manifest_name,
-            "details": "Cloud Firestore, Auth, Hosting, and Security Rules",
-        })
-        add_plugin_rec("firebase", "stack", "Firebase Firestore, Auth, Hosting, and Security Rules")
-        add_skill_rec("firebase-basics", "firebase", "stack", "Firebase CLI, project initialization, and emulator suite")
-        add_skill_rec("firebase-firestore", "firebase", "stack", "Firestore schema design, querying, and transactions")
-        add_skill_rec("firebase-security-rules-auditor", "firebase", "core", "Audit and hardening of Firestore & Cloud Storage security rules")
+        # Chrome Extension (manifest.json)
+        manifest_json_path = os.path.join(s_dir, "manifest.json")
+        if os.path.exists(manifest_json_path):
+            content = safe_read(manifest_json_path)
+            if "manifest_version" in content:
+                m_name = f"{rel_prefix}manifest.json"
+                if m_name not in manifests_found:
+                    manifests_found.append(m_name)
+                    technologies.append({
+                        "name": "Chrome Extension",
+                        "manifest": m_name,
+                        "details": "Chrome Extension manifest (v2/v3)",
+                        "tags": ["chrome-extension", "chrome", "web", "browser"],
+                    })
+                    detected_tech_tags.update(["chrome-extension", "chrome", "web", "browser"])
 
-    # Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
-    py_manifests = [
-        m for m in [
-            os.path.join(proj_dir, "pyproject.toml"),
-            os.path.join(proj_dir, "requirements.txt"),
-            os.path.join(proj_dir, "Pipfile"),
-            os.path.join(proj_dir, "setup.py"),
+        # Firebase (firebase.json, .firebaserc)
+        fb_json = os.path.join(s_dir, "firebase.json")
+        fb_rc = os.path.join(s_dir, ".firebaserc")
+        if os.path.exists(fb_json) or os.path.exists(fb_rc):
+            m_name = f"{rel_prefix}firebase.json" if os.path.exists(fb_json) else f"{rel_prefix}.firebaserc"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Firebase Platform",
+                    "manifest": m_name,
+                    "details": "Cloud Firestore, Auth, Hosting, and Security Rules",
+                    "tags": ["firebase", "backend", "cloud"],
+                })
+                detected_tech_tags.update(["firebase", "backend", "cloud"])
+
+        # Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
+        py_files = [
+            f for f in ["pyproject.toml", "requirements.txt", "Pipfile", "setup.py"]
+            if os.path.exists(os.path.join(s_dir, f))
         ]
-        if os.path.exists(m)
-    ]
-    if py_manifests:
-        primary_py = os.path.basename(py_manifests[0])
-        manifests_found.append(primary_py)
-        combined_py = " ".join([safe_read(m) for m in py_manifests]).lower()
+        if py_files:
+            primary_py = f"{rel_prefix}{py_files[0]}"
+            if primary_py not in manifests_found:
+                manifests_found.append(primary_py)
+                combined_py = " ".join([safe_read(os.path.join(s_dir, f)) for f in py_files]).lower()
+                py_details = ["Python 3"]
+                py_tags = ["python", "backend"]
+                if "fastapi" in combined_py:
+                    py_details.append("FastAPI")
+                    py_tags.append("fastapi")
+                if "flask" in combined_py:
+                    py_details.append("Flask")
+                    py_tags.append("flask")
+                if "django" in combined_py:
+                    py_details.append("Django")
+                    py_tags.append("django")
 
-        py_details = ["Python 3"]
-        if "fastapi" in combined_py:
-            py_details.append("FastAPI")
-        if "flask" in combined_py:
-            py_details.append("Flask")
-        if "django" in combined_py:
-            py_details.append("Django")
+                technologies.append({
+                    "name": "Python Environment",
+                    "manifest": primary_py,
+                    "details": ", ".join(py_details),
+                    "tags": py_tags,
+                })
+                detected_tech_tags.update(py_tags)
 
-        technologies.append({
-            "name": "Python Environment",
-            "manifest": primary_py,
-            "details": ", ".join(py_details),
-        })
+        # Rust (Cargo.toml)
+        cargo_path = os.path.join(s_dir, "Cargo.toml")
+        if os.path.exists(cargo_path):
+            m_name = f"{rel_prefix}Cargo.toml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Rust Platform",
+                    "manifest": m_name,
+                    "details": "Rust Cargo package specification",
+                    "tags": ["rust"],
+                })
+                detected_tech_tags.update(["rust"])
 
-        add_skill_rec("uv", "science", "stack", "Ultra-fast Python package management and virtual environments via uv")
+        # Go (go.mod)
+        go_mod_path = os.path.join(s_dir, "go.mod")
+        if os.path.exists(go_mod_path):
+            m_name = f"{rel_prefix}go.mod"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Go Platform",
+                    "manifest": m_name,
+                    "details": "Go module definition",
+                    "tags": ["go", "golang"],
+                })
+                detected_tech_tags.update(["go", "golang"])
 
-        if any(kw in combined_py for kw in ["antigravity", "google-genai", "gemini"]) or os.path.exists(os.path.join(proj_dir, "agents")):
-            add_plugin_rec("google-antigravity-sdk", "stack", "Antigravity SDK for multi-agent workflows, subagents, and tool execution")
+        # Containers / Docker
+        dockerfile = os.path.join(s_dir, "Dockerfile")
+        compose = os.path.join(s_dir, "docker-compose.yml")
+        if os.path.exists(dockerfile) or os.path.exists(compose):
+            m_name = f"{rel_prefix}Dockerfile" if os.path.exists(dockerfile) else f"{rel_prefix}docker-compose.yml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Containerization / Docker",
+                    "manifest": m_name,
+                    "details": "Container build specifications and multi-service definitions",
+                    "tags": ["docker", "container", "devops", "cloud"],
+                })
+                detected_tech_tags.update(["docker", "container", "devops", "cloud"])
 
-    # Containers / Docker
-    if os.path.exists(os.path.join(proj_dir, "Dockerfile")) or os.path.exists(os.path.join(proj_dir, "docker-compose.yml")):
-        doc_manifest = "Dockerfile" if os.path.exists(os.path.join(proj_dir, "Dockerfile")) else "docker-compose.yml"
-        manifests_found.append(doc_manifest)
-        technologies.append({
-            "name": "Containerization / Docker",
-            "manifest": doc_manifest,
-            "details": "Container build specifications and multi-service definitions",
-        })
-        add_plugin_rec("cloudrun", "stack", "Serverless container deployment and traffic routing")
-
-    # Dynamic Core Baseline Capabilities (Equipped for any repository)
+    # 3. Dynamic Catalog Recommendations
     lib_path = resolve_library_path(library_path)
     try:
         catalog = get_catalog(lib_path)
     except Exception:
         catalog = {}
 
-    core_found = False
+    # Core Baseline Capabilities from Catalog (.core marker or tier == "core")
     for p in catalog.get("plugins", []):
         if p.get("tier") == "core":
             add_plugin_rec(
@@ -1328,7 +1360,6 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
                 p.get("description") or "Universal core workflow plugin",
                 priority="Baseline",
             )
-            core_found = True
 
     for s in catalog.get("skills", []):
         if s.get("tier") == "core":
@@ -1339,18 +1370,64 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
                 s.get("description") or "Universal core workflow capability",
                 priority="Baseline",
             )
-            core_found = True
 
-    # Fallback to conventional baseline skills if armory catalog has no core markers yet
-    if not core_found:
-        conventional_defaults = [
-            ("spec", "Spec-driven engineering: write clear functional specs before writing code"),
-            ("pr-review", "Adversarial pull request critique, bug detection, and regression guard"),
-            ("preflight", "Pre-commit sanity verification, lint checks, and test runner assurance"),
-            ("wayfinder", "Deep codebase navigation, dependency mapping, and orientation"),
-        ]
-        for c_name, c_desc in conventional_defaults:
-            add_skill_rec(c_name, "", "core", c_desc, priority="Baseline")
+    # Dynamic Stack-Matched Capabilities from Catalog
+    def matches_tags(name: str, pkg: str, item_tags: List[str], desc: str, target_tags: Set[str]) -> Tuple[bool, str]:
+        norm_n = name.lower().replace("_", "-")
+        norm_p = pkg.lower().replace("_", "-")
+        norm_d = desc.lower()
+
+        for it in item_tags:
+            t_clean = str(it).lower().replace("_", "-")
+            if t_clean in target_tags:
+                return True, f"Matched tag '{t_clean}'"
+
+        for tt in target_tags:
+            if len(tt) > 2 and (tt in norm_n or tt in norm_p):
+                return True, f"Matched technology '{tt}'"
+            if len(tt) > 3 and re.search(r"\b" + re.escape(tt) + r"\b", norm_d):
+                return True, f"Matched capability description mentioning '{tt}'"
+
+        return False, ""
+
+    if detected_tech_tags:
+        for p in catalog.get("plugins", []):
+            if p.get("tier") == "core":
+                continue
+            matched, reason = matches_tags(
+                p["name"],
+                p.get("package", ""),
+                p.get("tags", []),
+                p.get("description", ""),
+                detected_tech_tags,
+            )
+            if matched:
+                add_plugin_rec(
+                    p["name"],
+                    "stack",
+                    p.get("description") or f"Plugin matched to workspace: {reason}",
+                    priority="High",
+                )
+
+        for s in catalog.get("skills", []):
+            if s.get("tier") == "core":
+                continue
+            matched, reason = matches_tags(
+                s["name"],
+                s.get("package", ""),
+                s.get("tags", []),
+                s.get("description", ""),
+                detected_tech_tags,
+            )
+            if matched:
+                add_skill_rec(
+                    s["name"],
+                    s.get("package", ""),
+                    "stack",
+                    s.get("description") or f"Skill matched to workspace: {reason}",
+                    priority="High",
+                )
+
 
     is_brand_new = False
     if not manifests_found:
@@ -1460,11 +1537,12 @@ def provision_assets(
         if is_plugin_match and force_type != "skill":
             plugin = plugin_map[req_norm]
             canonical_name = plugin["name"]
-            dest_dir = os.path.join(target_plugins_dir, canonical_name)
+            dest_parent = target_plugins_dir if target_plugins_dir else target_skills_dir
+            dest_dir = os.path.join(dest_parent, canonical_name)
 
             if dest_dir not in seen_destinations:
                 seen_destinations.add(dest_dir)
-                os.makedirs(target_plugins_dir, exist_ok=True)
+                os.makedirs(dest_parent, exist_ok=True)
                 src_dir = plugin["source_dir"]
                 shutil.copytree(
                     src_dir,
@@ -1628,7 +1706,7 @@ def sweep_project(
     target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
     installed_skills: List[Dict[str, Any]] = []
-    if os.path.exists(target_skills_dir):
+    if target_skills_dir and os.path.exists(target_skills_dir):
         for s_name in sorted(os.listdir(target_skills_dir)):
             s_path = os.path.join(target_skills_dir, s_name)
             if os.path.isdir(s_path):
@@ -1639,7 +1717,7 @@ def sweep_project(
                 })
 
     installed_plugins: List[Dict[str, Any]] = []
-    if os.path.exists(target_plugins_dir):
+    if target_plugins_dir and os.path.exists(target_plugins_dir):
         for p_name in sorted(os.listdir(target_plugins_dir)):
             p_path = os.path.join(target_plugins_dir, p_name)
             if os.path.isdir(p_path):
@@ -1770,11 +1848,20 @@ def sweep_project(
         p["name"].lower().replace("_", "-"): p for p in catalog.get("plugins", [])
     }
 
+    detected_tech_tags: Set[str] = set()
+    for tech in scan.get("technologies", []):
+        detected_tech_tags.update(tech.get("tags", []))
+
     for s in installed_skills:
         s_norm = s["name"].lower().replace("_", "-")
         cat_entry = catalog_skills_by_name.get(s_norm) or catalog_skills_by_name.get(s["name"].lower())
-        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
-        pkg = ((cat_entry.get("package") or "").lower().replace("_", "-")) if cat_entry else s_norm
+
+        # Unmanaged project skills protection: never prune custom local skills not in the central catalog
+        if not cat_entry:
+            continue
+
+        tier = cat_entry.get("tier", "stack")
+        pkg = ((cat_entry.get("package") or "").lower().replace("_", "-"))
 
         # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
         has_core = os.path.exists(os.path.join(s["path"], CORE_MARKER_FILE)) or (tier == "core")
@@ -1787,45 +1874,25 @@ def sweep_project(
         is_orphaned = False
         reason = ""
 
-        is_web_skill = s_norm in ("impeccable", "chrome-extensions") or "web" in s_norm or "chrome" in s_norm or "modern-web" in pkg
-        is_flutter_skill = "flutter" in s_norm or "flutter" in pkg or "dart" in s_norm
-        is_firebase_skill = "firebase" in s_norm or "firebase" in pkg
-        is_android_skill = "android" in s_norm or "android" in pkg or "gradle" in s_norm
-        is_python_skill = s_norm in ("uv",) or "python" in s_norm or "science" in pkg
-        is_docker_skill = "cloudrun" in s_norm or "docker" in s_norm
-
         if final_pruning_mode == "aggressive":
             is_matched = (s_norm in rec_skill_names) or (pkg in rec_packages)
             if not is_matched:
                 is_orphaned = True
-                if is_web_skill and not has_web:
-                    reason = "Web/Frontend skill installed, but no web manifests (package.json, HTML) found in workspace"
-                elif is_flutter_skill and not has_flutter:
-                    reason = "Flutter skill installed, but no pubspec.yaml found in workspace"
-                elif is_firebase_skill and not has_firebase:
-                    reason = "Firebase skill installed, but no firebase.json / .firebaserc found in workspace"
-                elif is_android_skill and not has_android:
-                    reason = "Android tool installed, but no Android/Gradle manifests found"
-                elif is_python_skill and not has_python:
-                    reason = "Python skill installed, but no Python manifests found in workspace"
-                elif is_docker_skill and not has_docker:
-                    reason = "Container skill installed, but no Dockerfile / docker-compose.yml found in workspace"
-                else:
-                    reason = f"Skill '{s['name']}' does not match any currently active technology in this workspace"
+                reason = f"Skill '{s['name']}' does not match any currently active technology in this workspace"
         else:
-            # Soft mode: conservative retention, only flag clear negative contradictions
-            if is_flutter_skill and not has_flutter:
+            # Soft mode: conservative retention, only flag clear negative domain contradictions
+            s_tags = set(cat_entry.get("tags", []))
+            is_mobile = bool(s_tags & {"mobile", "flutter", "android", "ios"}) or any(k in s_norm for k in ("flutter", "android", "ios"))
+            is_firebase = "firebase" in s_tags or "firebase" in s_norm
+            has_mobile = bool(detected_tech_tags & {"mobile", "flutter", "android", "ios"})
+            has_fb = "firebase" in detected_tech_tags
+
+            if is_mobile and not has_mobile:
                 is_orphaned = True
-                reason = "Flutter skill installed but no pubspec.yaml found in workspace"
-            elif is_firebase_skill and not has_firebase:
+                reason = f"Mobile skill '{s['name']}' installed, but no mobile manifests found in workspace"
+            elif is_firebase and not has_fb:
                 is_orphaned = True
-                reason = "Firebase skill installed but no firebase.json / .firebaserc found in workspace"
-            elif is_android_skill and not has_android:
-                is_orphaned = True
-                reason = "Android tool installed but no Android/Gradle manifests found"
-            elif is_docker_skill and not has_docker:
-                is_orphaned = True
-                reason = "Container skill installed but no Dockerfile / docker-compose.yml found"
+                reason = f"Firebase skill '{s['name']}' installed, but no firebase manifests found in workspace"
 
         if is_orphaned:
             candidate = {
@@ -1850,7 +1917,12 @@ def sweep_project(
     for p in installed_plugins:
         p_norm = p["name"].lower().replace("_", "-")
         cat_entry = catalog_plugins_by_name.get(p_norm) or catalog_plugins_by_name.get(p["name"].lower())
-        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
+
+        # Unmanaged project plugins protection: never prune custom local plugins not in the central catalog
+        if not cat_entry:
+            continue
+
+        tier = cat_entry.get("tier", "stack")
 
         # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
         has_core = os.path.exists(os.path.join(p["path"], CORE_MARKER_FILE)) or (tier == "core")
@@ -1863,45 +1935,25 @@ def sweep_project(
         is_orphaned = False
         reason = ""
 
-        is_web_plugin = p_norm in ("modern-web-guidance-plugin", "chrome-devtools-plugin") or "web" in p_norm or "chrome" in p_norm
-        is_flutter_plugin = "flutter" in p_norm
-        is_firebase_plugin = "firebase" in p_norm
-        is_android_plugin = "android" in p_norm
-        is_docker_plugin = "cloudrun" in p_norm or "docker" in p_norm
-        is_antigravity_plugin = "google-antigravity-sdk" in p_norm
-
         if final_pruning_mode == "aggressive":
             is_matched = p_norm in rec_plugin_names
             if not is_matched:
                 is_orphaned = True
-                if is_web_plugin and not has_web:
-                    reason = "Web/DevTools plugin installed, but no web manifests or frontend assets found in workspace"
-                elif is_flutter_plugin and not has_flutter:
-                    reason = "Flutter plugin installed, but no pubspec.yaml found in workspace"
-                elif is_firebase_plugin and not has_firebase:
-                    reason = "Firebase plugin installed, but no firebase.json / .firebaserc found in workspace"
-                elif is_android_plugin and not has_android:
-                    reason = "Android CLI plugin installed, but no Android/Gradle manifests found"
-                elif is_docker_plugin and not has_docker:
-                    reason = "Cloud Run plugin installed, but no Dockerfile / docker-compose.yml found in workspace"
-                elif is_antigravity_plugin and not (has_python and any(kw in safe_read(os.path.join(proj_dir, "pyproject.toml")).lower() for kw in ["antigravity", "gemini"])):
-                    reason = "Antigravity SDK plugin installed, but no Antigravity dependencies or agents found"
-                else:
-                    reason = f"Plugin '{p['name']}' does not match any currently active technology in this workspace"
+                reason = f"Plugin '{p['name']}' does not match any currently active technology in this workspace"
         else:
-            # Soft mode: conservative retention, only flag clear negative contradictions
-            if is_flutter_plugin and not has_flutter:
+            # Soft mode: conservative retention, only flag clear negative domain contradictions
+            p_tags = set(cat_entry.get("tags", []))
+            is_mobile = bool(p_tags & {"mobile", "flutter", "android", "ios"}) or any(k in p_norm for k in ("flutter", "android", "ios"))
+            is_firebase = "firebase" in p_tags or "firebase" in p_norm
+            has_mobile = bool(detected_tech_tags & {"mobile", "flutter", "android", "ios"})
+            has_fb = "firebase" in detected_tech_tags
+
+            if is_mobile and not has_mobile:
                 is_orphaned = True
-                reason = "Flutter plugin installed but no pubspec.yaml found in workspace"
-            elif is_firebase_plugin and not has_firebase:
+                reason = f"Mobile plugin '{p['name']}' installed, but no mobile manifests found in workspace"
+            elif is_firebase and not has_fb:
                 is_orphaned = True
-                reason = "Firebase plugin installed but no firebase.json / .firebaserc found in workspace"
-            elif is_android_plugin and not has_android:
-                is_orphaned = True
-                reason = "Android CLI plugin installed but no Android/Gradle manifests found"
-            elif is_docker_plugin and not has_docker:
-                is_orphaned = True
-                reason = "Cloud Run plugin installed but no Dockerfile / docker-compose.yml found"
+                reason = f"Firebase plugin '{p['name']}' installed, but no firebase manifests found in workspace"
 
         if is_orphaned:
             candidate = {
@@ -2715,7 +2767,25 @@ def main() -> int:
         help="Override skills-library directory path for this execution.",
     )
 
-    args = parser.parse_args()
+    # Defensive filter: clean extraneous 'sweep' positional arguments
+    raw_args = sys.argv[1:]
+    filtered_args = []
+    seen_sweep = False
+    for a in raw_args:
+        if a == "--sweep":
+            seen_sweep = True
+            filtered_args.append(a)
+        elif a == "sweep" and (seen_sweep or (filtered_args and filtered_args[-1] == "--sweep")):
+            # Redundant literal 'sweep' argument
+            continue
+        elif a == "sweep" and not filtered_args:
+            # Invoked as `quartermaster.py sweep` -> convert to `--sweep .`
+            filtered_args.extend(["--sweep", "."])
+            seen_sweep = True
+        else:
+            filtered_args.append(a)
+
+    args = parser.parse_args(filtered_args)
 
     # Context Documentation Sync
     if args.sync_docs:

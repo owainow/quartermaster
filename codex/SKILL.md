@@ -32,11 +32,14 @@ python3 "$QM_SCRIPT" --scan . --harness codex --json
 ```
 
 When project stack is uncertain or when starting an empty repository:
-- Strictly follow the "I'm not sure yet" protocol: equip universal Core capabilities only (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`).
+- Strictly follow the "I'm not sure yet" protocol: equip universal Core capabilities configured in your armory (e.g. marked with `.core` or designated by user).
 - Defer framework-specific tools until codebase manifests are created.
 
 Provision approved capabilities:
 ```bash
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --provision . --skills <approved_names> --harness codex
 ```
 
@@ -44,6 +47,7 @@ python3 "$QM_SCRIPT" --provision . --skills <approved_names> --harness codex
 Audit active capabilities against codebase manifests:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --sweep . --harness codex
 ```
@@ -58,6 +62,7 @@ Supported flags:
 Import an external repository or extract a specific skill into the armory and active workspace:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --import <git_url> --project . --harness codex
 ```
@@ -69,15 +74,22 @@ Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/
 - List Core capabilities:
   ```bash
   QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-list --project .
   ```
 - Add Core protection:
   ```bash
+  QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-add <name> --project .
   ```
 - Remove Core protection:
   ```bash
+  QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-rm <name> --project .
   ```
 

@@ -70,8 +70,8 @@ If `status == "unscoped_new_project"` (no manifests found or empty directory):
 
 #### Scenario B: Active Project with Identified Manifests
 Present the detected technologies and categorize recommendations:
-- **Core Capabilities Baseline**: Universal guardrails (`spec`, `pr-review`, `preflight`, `wayfinder`, `pm`).
-- **Stack-Specific Capabilities**: Matched plugins (e.g. `modern-web-guidance-plugin`, `firebase`, `flutter`) and skills (e.g. `impeccable`, `uv`).
+- **Core Capabilities Baseline**: Universal guardrails configured in your armory (e.g. marked with `.core` or designated by user).
+- **Stack-Specific Capabilities**: Matched plugins and skills from your central armory tailored to detected technologies.
 
 ---
 
@@ -95,8 +95,8 @@ python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py \
 ```
 
 Quartermaster automatically routes:
-- **Full Plugins** (packages containing `plugin.json`, e.g. `modern-web-guidance-plugin`, `firebase`, `flutter`) &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
-- **Standalone Skills** (e.g. `impeccable`, `uv`) &rarr; `<project_path>/.agents/skills/<skill_name>/`
+- **Full Plugins** (packages containing `plugin.json`) &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
+- **Standalone Skills** &rarr; `<project_path>/.agents/skills/<skill_name>/`
 
 ---
 
@@ -108,8 +108,8 @@ Quartermaster automatically routes:
 2. **Present Confirmation Summary**:
    | Capability Name | Type | Destination |
    | :--- | :--- | :--- |
-   | `modern-web-guidance-plugin` | Plugin | `.agents/plugins/modern-web-guidance-plugin/` |
-   | `impeccable` | Skill | `.agents/skills/impeccable/` |
+   | `<plugin_name>` | Plugin | `.agents/plugins/<plugin_name>/` |
+   | `<skill_name>` | Skill | `.agents/skills/<skill_name>/` |
 3. **Automatically Register Daily Sweep**:
    - Actively call the `schedule` tool:
      - `CronExpression`: `"0 9 * * *"`

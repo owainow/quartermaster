@@ -54,3 +54,4 @@ When Quartermaster provisions or prunes capabilities in a project, it automatica
 ```
 
 This gives Claude immediate visibility into active workspace capabilities upon session start.
+

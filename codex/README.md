@@ -16,15 +16,15 @@ This links Quartermaster into `~/.agents/skills/quartermaster`. Because OpenAI C
 
 ## Operating Quartermaster in Codex CLI
 
-Codex CLI allows both natural language triggering and explicit dollar mentions:
+Codex CLI allows both natural language triggering and slash commands:
 
-| Command / Mention | Purpose |
+| Command | Purpose |
 | :--- | :--- |
-| **`$quartermaster`** | Scans current project manifests, guides scoping, and provisions capabilities into `.agents/skills/` |
-| **`$quartermaster sweep`** | Audits installed capabilities against codebase manifests, auto-equips new matches, and suggests pruning |
-| **`$quartermaster import <git-url>`** | Imports an external repository or skill into the armory and active project |
-| **`$quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files shielding permanent guardrails from pruning |
-| **`$quartermaster catalog`** | Lists all capabilities available across the central armory |
+| **`/quartermaster`** | Scans current project manifests, guides scoping, and provisions capabilities into `.agents/skills/` |
+| **`/quartermaster sweep`** | Audits installed capabilities against codebase manifests, auto-equips new matches, and suggests pruning |
+| **`/quartermaster import <git-url>`** | Imports an external repository or skill into the armory and active project |
+| **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files shielding permanent guardrails from pruning |
+| **`/quartermaster catalog`** | Lists all capabilities available across the central armory |
 
 ---
 
@@ -40,3 +40,4 @@ When Quartermaster provisions or prunes capabilities in a project, it automatica
 ```
 
 OpenAI Codex CLI automatically ingests `AGENTS.md` at session start, giving your coding agents clear awareness of outfitted tools.
+

@@ -7,13 +7,9 @@ This repository uses Quartermaster to manage project-scoped capabilities in `.ag
 
 | Capability | Type | Path | Status |
 | :--- | :--- | :--- | :--- |
-| `spec` | Skill | `.agents/skills/spec` | Core (Protected) |
-| `pr-review` | Skill | `.agents/skills/pr-review` | Core (Protected) |
-| `pm` | Skill | `.agents/skills/pm` | Core (Protected) |
-| `preflight` | Skill | `.agents/skills/preflight` | Core (Protected) |
-| `wayfinder` | Skill | `.agents/skills/wayfinder` | Core (Protected) |
+| *(None)* | - | - | Run `/quartermaster` to equip capabilities |
 
-Direct Mentions: `$quartermaster`, `$quartermaster sweep`
+Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`
 <!-- QUARTERMASTER_END -->
 
 ---
@@ -27,7 +23,7 @@ Direct Mentions: `$quartermaster`, `$quartermaster sweep`
    Folders in `.agents/skills/` or `.agents/plugins/` that contain a `.core` marker file are protected permanent guardrails. Do not delete or prune these tools.
 
 3. **Align Capabilities on Dependency Changes**:
-   When introducing new frameworks or package manifests to the codebase, mention `$quartermaster sweep` to auto-equip corresponding skills from the central armory.
+   When introducing new frameworks or package manifests to the codebase, run `/quartermaster sweep` to auto-equip corresponding skills from the central armory.
 
 4. **Pruning Hygiene**:
-   When removing frameworks or retiring dependencies, run a sweep with `$quartermaster sweep --auto-prune` to keep the workspace free from capability bloat.
+   When removing frameworks or retiring dependencies, run a sweep with `/quartermaster sweep --auto-prune` to keep the workspace free from capability bloat.

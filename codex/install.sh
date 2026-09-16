@@ -6,6 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_DIR="${HOME}/.agents/skills/quartermaster"
+CODEX_TARGET_DIR="${HOME}/.codex/skills/quartermaster"
 CONFIG_DIR="${HOME}/.codex/quartermaster"
 
 FORCE=0
@@ -27,6 +28,7 @@ if ! command -v python3 &>/dev/null; then
 fi
 
 mkdir -p "${HOME}/.agents/skills"
+mkdir -p "${HOME}/.codex/skills"
 mkdir -p "${CONFIG_DIR}"
 
 LIB_PATH="${HOME}/.agents/skills-library"
@@ -63,16 +65,20 @@ if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
   rm -rf "${TARGET_DIR}"
 fi
 
-# Link the Codex harness directory into ~/.agents/skills/quartermaster
+# Link into ~/.agents/skills/quartermaster and ~/.codex/skills/quartermaster
 ln -snf "${SCRIPT_DIR}" "${TARGET_DIR}"
+ln -snf "${SCRIPT_DIR}" "${CODEX_TARGET_DIR}"
 
 echo ""
-echo "Quartermaster skill successfully linked to: ${TARGET_DIR}"
+echo "Quartermaster skill successfully linked to:"
+echo "  - ${TARGET_DIR}"
+echo "  - ${CODEX_TARGET_DIR}"
 echo ""
-echo "OpenAI Codex CLI natively scans ~/.agents/skills/ out of the box."
-echo "You can now open any repository in Codex CLI and mention:"
-echo "  \$quartermaster          (Onboard workspace and equip tailored capabilities)"
-echo "  \$quartermaster sweep    (Audit project tech and review pruning recommendations)"
-echo "  \$quartermaster catalog  (Browse all available armory capabilities)"
+echo "OpenAI Codex CLI natively scans ~/.agents/skills/ and ~/.codex/skills/."
+echo "You can now open any repository in Codex CLI and run:"
+echo "  /quartermaster          (Onboard workspace and equip tailored capabilities)"
+echo "  /quartermaster sweep    (Audit project tech and review pruning recommendations)"
+echo "  /quartermaster catalog  (Browse all available armory capabilities)"
 echo ""
 echo "================================================================================"
+
