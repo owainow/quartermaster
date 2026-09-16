@@ -34,7 +34,27 @@ GLOBAL_CONFIG_DIR = os.path.expanduser("~/.gemini/quartermaster")
 GLOBAL_CONFIG_FILE = os.path.join(GLOBAL_CONFIG_DIR, "config.json")
 FALLBACK_CONFIG_FILE = os.path.expanduser("~/.quartermaster/config.json")
 
+CLAUDE_CONFIG_DIR = os.path.expanduser("~/.claude/quartermaster")
+CLAUDE_CONFIG_FILE = os.path.join(CLAUDE_CONFIG_DIR, "config.json")
+
+CODEX_CONFIG_DIR = os.path.expanduser("~/.codex/quartermaster")
+CODEX_CONFIG_FILE = os.path.join(CODEX_CONFIG_DIR, "config.json")
+
+CONFIG_SEARCH_PATHS = [
+    CLAUDE_CONFIG_FILE,
+    CODEX_CONFIG_FILE,
+    GLOBAL_CONFIG_FILE,
+    FALLBACK_CONFIG_FILE,
+]
+
 DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
+
+PROBE_LIBRARY_DIRS = [
+    os.path.expanduser("~/.gemini/skills-library"),
+    os.path.expanduser("~/.claude/skills-library"),
+    os.path.expanduser("~/.agents/skills-library"),
+    os.path.expanduser("~/.quartermaster/skills-library"),
+]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "skills-library": DEFAULT_LIBRARY_PATH,
@@ -44,37 +64,320 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "pruning-mode": "aggressive",
 }
 
+SUPPORTED_HARNESSES = ("agy", "claude", "codex", "universal")
+
 # ==============================================================================
 # Deterministic Core Capability Governance (.core marker file)
 # ==============================================================================
 CORE_MARKER_FILE = ".core"
-CONVENTIONAL_CORE_NAMES = {
-    "spec",
-    "pr-review",
-    "pm",
-    "preflight",
-    "wayfinder",
-    "review",
-}
+
+
+# ==============================================================================
+# Multi-Harness Detection & Target Path Resolution
+# ==============================================================================
+
+def safe_write_file(file_path: str, content: str) -> None:
+    """Atomically write content to file_path using a temporary file."""
+    target_dir = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(target_dir, exist_ok=True)
+    tmp_path = f"{file_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(tmp_path, file_path)
+
+
+def detect_harness(project_path: Optional[str] = None, explicit_harness: Optional[str] = None) -> str:
+    """
+    Detects the active agent harness.
+    Precedence:
+    1. Explicit CLI argument (--harness) if not 'auto'
+    2. QUARTERMASTER_HARNESS environment variable
+    3. Active harness environment variables (CLAUDE_PROJECT_DIR, CODEX_HOME, etc.)
+    4. Project marker files and directories:
+       - .claude/ directory or CLAUDE.md -> 'claude'
+       - .codex/ directory or AGENTS.md -> 'codex'
+       - .gemini/ directory -> 'agy'
+       - .agents/ directory -> 'codex' (if ~/.codex) or 'agy'
+    5. Host user environment:
+       - ~/.claude exists and neither ~/.gemini nor ~/.codex -> 'claude'
+       - ~/.codex exists and not ~/.gemini -> 'codex'
+       - ~/.gemini exists -> 'agy'
+    6. Default fallback: 'agy'
+    """
+    if explicit_harness and explicit_harness.lower() != "auto":
+        h = explicit_harness.lower().strip()
+        if h in SUPPORTED_HARNESSES:
+            return h
+
+    env_h = os.environ.get("QUARTERMASTER_HARNESS", "").strip().lower()
+    if env_h in SUPPORTED_HARNESSES:
+        return env_h
+
+    if os.environ.get("CLAUDE_PROJECT_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "claude"
+    if os.environ.get("CODEX_HOME") or os.environ.get("CODEX_CLI"):
+        return "codex"
+
+    probe_dir = os.path.abspath(os.path.expanduser(project_path)) if project_path else os.getcwd()
+
+    if os.path.exists(os.path.join(probe_dir, ".claude")) or os.path.exists(os.path.join(probe_dir, "CLAUDE.md")):
+        return "claude"
+    if os.path.exists(os.path.join(probe_dir, ".codex")) or os.path.exists(os.path.join(probe_dir, "AGENTS.md")):
+        return "codex"
+    if os.path.exists(os.path.join(probe_dir, ".gemini")):
+        return "agy"
+    if os.path.exists(os.path.join(probe_dir, ".agents")):
+        if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+            return "codex"
+        return "agy"
+
+    if os.path.exists(os.path.expanduser("~/.claude")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+        return "claude"
+    if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+        return "codex"
+    if os.path.exists(os.path.expanduser("~/.gemini")):
+        return "agy"
+
+    return "agy"
+
+
+def get_harness_target_paths(project_path: str, harness: str) -> Tuple[str, str]:
+    """
+    Returns (skills_dir, plugins_dir) for the given harness.
+    - claude: <project>/.claude/skills and "" (Claude Code discovers .claude/skills only)
+    - agy / codex / universal: <project>/.agents/skills and <project>/.agents/plugins
+    """
+    proj = os.path.abspath(os.path.expanduser(project_path))
+    if harness == "claude":
+        claude_skills = os.path.join(proj, ".claude", "skills")
+        return (claude_skills, "")
+    return (
+        os.path.join(proj, ".agents", "skills"),
+        os.path.join(proj, ".agents", "plugins"),
+    )
+
+
+# ==============================================================================
+# Agent Context Documentation Synchronization (CLAUDE.md / AGENTS.md)
+# ==============================================================================
+
+def sync_claude_md(
+    project_path: str,
+    active_skills: List[Dict[str, Any]],
+    active_plugins: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Maintains an active capabilities table inside <project>/CLAUDE.md between HTML comments:
+    <!-- QUARTERMASTER_START --> and <!-- QUARTERMASTER_END -->.
+    """
+    claude_md_path = os.path.join(project_path, "CLAUDE.md")
+    content = ""
+    if os.path.exists(claude_md_path):
+        try:
+            with open(claude_md_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read {claude_md_path}: {e}\n")
+            return None
+
+    start_marker = "<!-- QUARTERMASTER_START -->"
+    end_marker = "<!-- QUARTERMASTER_END -->"
+
+    block_lines = [
+        start_marker,
+        "## Active Project Capabilities (Managed by Quartermaster)",
+        "",
+        "This project is outfitted with project-scoped capabilities.",
+        "",
+        "| Capability | Type | Path | Status |",
+        "| :--- | :--- | :--- | :--- |",
+    ]
+
+    for s in sorted(active_skills, key=lambda x: x["name"]):
+        s_name = s["name"]
+        s_path = s.get("path", f".claude/skills/{s_name}")
+        s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
+        rel_path = os.path.relpath(s_path_full, project_path)
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
+
+    for p in sorted(active_plugins, key=lambda x: x["name"]):
+        p_name = p["name"]
+        p_path = p.get("path", f".claude/skills/{p_name}")
+        p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
+        rel_path = os.path.relpath(p_path_full, project_path)
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
+
+    if not active_skills and not active_plugins:
+        block_lines.append("| *(None)* | - | - | Run `/quartermaster` to equip capabilities |")
+
+    block_lines.append("")
+    block_lines.append("Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`")
+    block_lines.append(end_marker)
+    new_block = "\n".join(block_lines)
+
+    if start_marker in content and end_marker not in content:
+        content = content.replace(start_marker, f"{start_marker}\n{end_marker}\n")
+
+    pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
+    if pattern.search(content):
+        updated = pattern.sub(new_block, content)
+    else:
+        if content.strip():
+            updated = content.rstrip() + "\n\n" + new_block + "\n"
+        else:
+            updated = "# Project Guidelines\n\n" + new_block + "\n"
+
+    try:
+        safe_write_file(claude_md_path, updated)
+        return claude_md_path
+    except Exception:
+        return None
+
+
+def sync_agents_md(
+    project_path: str,
+    active_skills: List[Dict[str, Any]],
+    active_plugins: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Maintains an active capabilities table inside <project>/AGENTS.md between HTML comments:
+    <!-- QUARTERMASTER_START --> and <!-- QUARTERMASTER_END -->.
+    """
+    agents_md_path = os.path.join(project_path, "AGENTS.md")
+    content = ""
+    if os.path.exists(agents_md_path):
+        try:
+            with open(agents_md_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read {agents_md_path}: {e}\n")
+            return None
+
+    start_marker = "<!-- QUARTERMASTER_START -->"
+    end_marker = "<!-- QUARTERMASTER_END -->"
+
+    block_lines = [
+        start_marker,
+        "## Active Agent Capabilities (Managed by Quartermaster)",
+        "",
+        "This repository uses Quartermaster to manage project-scoped capabilities in `.agents/skills/`.",
+        "",
+        "| Capability | Type | Path | Status |",
+        "| :--- | :--- | :--- | :--- |",
+    ]
+
+    for s in sorted(active_skills, key=lambda x: x["name"]):
+        s_name = s["name"]
+        s_path = s.get("path", f".agents/skills/{s_name}")
+        s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
+        rel_path = os.path.relpath(s_path_full, project_path)
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
+
+    for p in sorted(active_plugins, key=lambda x: x["name"]):
+        p_name = p["name"]
+        p_path = p.get("path", f".agents/plugins/{p_name}")
+        p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
+        rel_path = os.path.relpath(p_path_full, project_path)
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
+        status = "Core (Protected)" if is_core else "Active"
+        block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
+
+    if not active_skills and not active_plugins:
+        block_lines.append("| *(None)* | - | - | Run `/quartermaster` to equip capabilities |")
+
+    block_lines.append("")
+    block_lines.append("Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`")
+    block_lines.append(end_marker)
+    new_block = "\n".join(block_lines)
+
+    if start_marker in content and end_marker not in content:
+        content = content.replace(start_marker, f"{start_marker}\n{end_marker}\n")
+
+    pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
+    if pattern.search(content):
+        updated = pattern.sub(new_block, content)
+    else:
+        if content.strip():
+            updated = content.rstrip() + "\n\n" + new_block + "\n"
+        else:
+            updated = "# Agent Guidelines\n\n" + new_block + "\n"
+
+    try:
+        safe_write_file(agents_md_path, updated)
+        return agents_md_path
+    except Exception:
+        return None
+
+
+def sync_project_docs(
+    project_path: str,
+    harness: str,
+    active_skills: Optional[List[Dict[str, Any]]] = None,
+    active_plugins: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Optional[str]]:
+    """
+    Synchronizes project context files (CLAUDE.md, AGENTS.md) based on active harness.
+    """
+    proj = os.path.abspath(os.path.expanduser(project_path))
+    results: Dict[str, Optional[str]] = {}
+
+    if active_skills is None or active_plugins is None:
+        active_skills = []
+        active_plugins = []
+        skills_dir, plugins_dir = get_harness_target_paths(proj, harness)
+        if skills_dir and os.path.exists(skills_dir):
+            for s in sorted(os.listdir(skills_dir)):
+                sp = os.path.join(skills_dir, s)
+                if os.path.isdir(sp) and not s.startswith("."):
+                    active_skills.append({"name": s, "path": sp, "type": "skill"})
+        if plugins_dir and os.path.exists(plugins_dir):
+            for p in sorted(os.listdir(plugins_dir)):
+                pp = os.path.join(plugins_dir, p)
+                if os.path.isdir(pp) and not p.startswith("."):
+                    active_plugins.append({"name": p, "path": pp, "type": "plugin"})
+
+    if harness == "claude" or os.path.exists(os.path.join(proj, "CLAUDE.md")):
+        results["claude"] = sync_claude_md(proj, active_skills, active_plugins)
+
+    if harness == "codex" or os.path.exists(os.path.join(proj, "AGENTS.md")):
+        results["codex"] = sync_agents_md(proj, active_skills, active_plugins)
+
+    if harness == "universal":
+        results["claude"] = sync_claude_md(proj, active_skills, active_plugins)
+        results["codex"] = sync_agents_md(proj, active_skills, active_plugins)
+
+    return results
 
 
 # ==============================================================================
 # Configuration & Settings Management
 # ==============================================================================
 
-def get_active_config_file() -> str:
-    """Returns the primary config file path."""
-    if os.path.exists(GLOBAL_CONFIG_FILE):
+def get_active_config_file(harness: Optional[str] = None) -> str:
+    """Returns the primary config file path based on active harness or existing files."""
+    if harness == "claude":
+        return CLAUDE_CONFIG_FILE
+    elif harness == "codex":
+        return CODEX_CONFIG_FILE
+    elif harness == "agy":
         return GLOBAL_CONFIG_FILE
-    if os.path.exists(FALLBACK_CONFIG_FILE):
-        return FALLBACK_CONFIG_FILE
+
+    for p in CONFIG_SEARCH_PATHS:
+        if os.path.exists(p):
+            return p
     return GLOBAL_CONFIG_FILE
 
 
-def load_config() -> Dict[str, Any]:
+def load_config(harness: Optional[str] = None) -> Dict[str, Any]:
     """Loads Quartermaster settings from disk or returns defaults."""
     cfg = dict(DEFAULT_CONFIG)
-    cfg_file = get_active_config_file()
+    cfg_file = get_active_config_file(harness)
     if os.path.exists(cfg_file):
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
@@ -86,59 +389,113 @@ def load_config() -> Dict[str, Any]:
     return cfg
 
 
-def save_config(cfg: Dict[str, Any]) -> str:
-    """Saves Quartermaster settings to disk."""
-    cfg_file = GLOBAL_CONFIG_FILE
-    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
-    with open(cfg_file, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
+def save_config(cfg: Dict[str, Any], harness: Optional[str] = None) -> str:
+    """Saves Quartermaster settings to disk atomically."""
+    cfg_file = get_active_config_file(harness)
+    content = json.dumps(cfg, indent=2) + "\n"
+    safe_write_file(cfg_file, content)
     return cfg_file
 
 
-def get_config_value(key: str) -> Optional[Any]:
+def get_config_value(key: str, harness: Optional[str] = None) -> Optional[Any]:
     """Retrieves a specific configuration value."""
-    cfg = load_config()
+    cfg = load_config(harness)
     return cfg.get(key)
 
 
-def set_config_value(key: str, value: Any) -> Dict[str, Any]:
-    """Sets a specific configuration value and persists it."""
-    cfg = load_config()
-    # Normalize booleans if passed as string
-    if isinstance(value, str):
-        if value.lower() in ("true", "1", "yes", "on"):
-            value = True
-        elif value.lower() in ("false", "0", "no", "off"):
-            value = False
-        elif key in ("pruning-mode", "prune-mode"):
-            value = value.lower()
-            if value not in ("aggressive", "soft"):
-                value = "aggressive"
-    if key == "prune-mode":
-        key = "pruning-mode"
-    cfg[key] = value
-    save_config(cfg)
+ALLOWED_CONFIG_KEYS = {
+    "skills-library",
+    "auto-add",
+    "suggest-pruning",
+    "auto-prune",
+    "pruning-mode",
+    "prune-mode",
+    "harness",
+}
+
+
+def set_config_value(key: str, value: Any, harness: Optional[str] = None) -> Dict[str, Any]:
+    """Sets a specific configuration value and persists it with strict validation."""
+    key_norm = str(key).strip().lower()
+    if key_norm == "prune-mode":
+        key_norm = "pruning-mode"
+
+    if key_norm not in ALLOWED_CONFIG_KEYS:
+        valid_keys = ", ".join(sorted(["skills-library", "auto-add", "suggest-pruning", "auto-prune", "pruning-mode", "harness"]))
+        raise ValueError(f"Invalid configuration key '{key}'. Allowed keys: {valid_keys}")
+
+    cfg = load_config(harness)
+
+    if key_norm in ("auto-add", "suggest-pruning", "auto-prune"):
+        if isinstance(value, bool):
+            val = value
+        elif isinstance(value, str):
+            v_lower = value.strip().lower()
+            if v_lower in ("true", "1", "yes", "on"):
+                val = True
+            elif v_lower in ("false", "0", "no", "off"):
+                val = False
+            else:
+                raise ValueError(
+                    f"Invalid boolean value '{value}' for '{key_norm}'. Expected true or false."
+                )
+        elif isinstance(value, (int, float)):
+            val = bool(value)
+        else:
+            raise ValueError(
+                f"Invalid boolean value '{value}' for '{key_norm}'. Expected true or false."
+            )
+        cfg[key_norm] = val
+    elif key_norm == "pruning-mode":
+        v_str = str(value).strip().lower()
+        if v_str not in ("aggressive", "soft"):
+            raise ValueError(
+                f"Invalid pruning-mode '{value}'. Allowed modes: aggressive, soft"
+            )
+        cfg[key_norm] = v_str
+    elif key_norm == "harness":
+        v_str = str(value).strip().lower()
+        if v_str not in SUPPORTED_HARNESSES:
+            valid_h = ", ".join(SUPPORTED_HARNESSES)
+            raise ValueError(f"Invalid harness '{value}'. Allowed harnesses: {valid_h}")
+        cfg[key_norm] = v_str
+    elif key_norm == "skills-library":
+        v_str = str(value).strip()
+        if not v_str:
+            raise ValueError("skills-library path cannot be empty.")
+        cfg[key_norm] = os.path.abspath(os.path.expanduser(v_str))
+
+    save_config(cfg, harness)
     return cfg
 
 
-def resolve_library_path(custom_path: Optional[str] = None) -> str:
+def resolve_library_path(custom_path: Optional[str] = None, harness: Optional[str] = None) -> str:
     """
     Resolve the active Quartermaster library path:
     1. CLI argument (--library)
     2. Configured 'skills-library' setting
-    3. Default location (~/.gemini/skills-library)
+    3. Existing library in PROBE_LIBRARY_DIRS
+    4. Harness-specific default:
+       - claude: ~/.claude/skills-library
+       - codex: ~/.agents/skills-library
+       - agy / fallback: ~/.gemini/skills-library
     """
     if custom_path:
-        expanded = os.path.abspath(os.path.expanduser(custom_path))
-        if os.path.exists(expanded):
-            return expanded
+        return os.path.abspath(os.path.expanduser(custom_path))
 
-    cfg = load_config()
+    cfg = load_config(harness)
     configured_lib = cfg.get("skills-library")
     if configured_lib:
-        expanded = os.path.abspath(os.path.expanduser(configured_lib))
-        if os.path.exists(expanded):
-            return expanded
+        return os.path.abspath(os.path.expanduser(configured_lib))
+
+    for p in PROBE_LIBRARY_DIRS:
+        if os.path.exists(p):
+            return p
+
+    if harness == "claude":
+        return os.path.abspath(os.path.expanduser("~/.claude/skills-library"))
+    elif harness == "codex":
+        return os.path.abspath(os.path.expanduser("~/.agents/skills-library"))
 
     return os.path.abspath(DEFAULT_LIBRARY_PATH)
 
@@ -158,6 +515,10 @@ def interactive_config() -> None:
     current_prune_mode = cfg.get("pruning-mode") or cfg.get("prune-mode") or "aggressive"
     print(f"  * pruning-mode    = {current_prune_mode} (aggressive = strict stack alignment; soft = conservative retention)")
 
+    # In non-interactive agent environments, avoid blocking on input() or throwing EOFError
+    if not sys.stdin.isatty():
+        return
+
     print("-" * 80)
     print("Options:")
     print("  1. Update 'skills-library' path")
@@ -168,41 +529,44 @@ def interactive_config() -> None:
     print("  6. Reset settings to default")
     print("  7. Exit")
 
-    choice = input("\nEnter choice [1-7] (default: 7): ").strip()
-    if choice == "1":
-        current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
-        new_val = input(f"Enter new skills-library path [{current}]: ").strip()
-        if new_val:
-            expanded = os.path.abspath(os.path.expanduser(new_val))
-            if not os.path.exists(expanded):
-                print(f"\nWarning: Path does not exist on disk: {expanded}")
-                confirm = input("Save anyway? (y/N): ").strip().lower()
-                if confirm != "y":
-                    print("Operation cancelled.")
-                    return
-            set_config_value("skills-library", expanded)
-            print(f"\nUpdated 'skills-library' to: {expanded}")
-    elif choice == "2":
-        new_val = not cfg.get("auto-add", True)
-        set_config_value("auto-add", new_val)
-        print(f"\nUpdated 'auto-add' to: {new_val}")
-    elif choice == "3":
-        new_val = not cfg.get("suggest-pruning", True)
-        set_config_value("suggest-pruning", new_val)
-        print(f"\nUpdated 'suggest-pruning' to: {new_val}")
-    elif choice == "4":
-        new_val = not cfg.get("auto-prune", False)
-        set_config_value("auto-prune", new_val)
-        print(f"\nUpdated 'auto-prune' to: {new_val}")
-    elif choice == "5":
-        new_val = "soft" if current_prune_mode.lower() == "aggressive" else "aggressive"
-        set_config_value("pruning-mode", new_val)
-        print(f"\nUpdated 'pruning-mode' to: {new_val}")
-    elif choice == "6":
-        save_config(dict(DEFAULT_CONFIG))
-        print("\nSettings reset to default.")
-    else:
-        print("\nNo changes made.")
+    try:
+        choice = input("\nEnter choice [1-7] (default: 7): ").strip()
+        if choice == "1":
+            current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
+            new_val = input(f"Enter new skills-library path [{current}]: ").strip()
+            if new_val:
+                expanded = os.path.abspath(os.path.expanduser(new_val))
+                if not os.path.exists(expanded):
+                    print(f"\nWarning: Path does not exist on disk: {expanded}")
+                    confirm = input("Save anyway? (y/N): ").strip().lower()
+                    if confirm != "y":
+                        print("Operation cancelled.")
+                        return
+                set_config_value("skills-library", expanded)
+                print(f"\nUpdated 'skills-library' to: {expanded}")
+        elif choice == "2":
+            new_val = not cfg.get("auto-add", True)
+            set_config_value("auto-add", new_val)
+            print(f"\nUpdated 'auto-add' to: {new_val}")
+        elif choice == "3":
+            new_val = not cfg.get("suggest-pruning", True)
+            set_config_value("suggest-pruning", new_val)
+            print(f"\nUpdated 'suggest-pruning' to: {new_val}")
+        elif choice == "4":
+            new_val = not cfg.get("auto-prune", False)
+            set_config_value("auto-prune", new_val)
+            print(f"\nUpdated 'auto-prune' to: {new_val}")
+        elif choice == "5":
+            new_val = "soft" if current_prune_mode.lower() == "aggressive" else "aggressive"
+            set_config_value("pruning-mode", new_val)
+            print(f"\nUpdated 'pruning-mode' to: {new_val}")
+        elif choice == "6":
+            save_config(dict(DEFAULT_CONFIG))
+            print("\nSettings reset to default.")
+        else:
+            print("\nNo changes made.")
+    except (EOFError, KeyboardInterrupt):
+        print("\nSession ended.")
 
 
 # ==============================================================================
@@ -255,12 +619,30 @@ def find_project_root(start_dir: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def git_clone_ref(clone_url: str, dest_dir: str, target_ref: Optional[str] = None) -> None:
+    """Clones a git repository, pinning to target_ref (branch/tag/commit) if provided."""
+    if target_ref:
+        # First attempt: shallow clone targeting branch or tag directly
+        cmd = ["git", "clone", "--depth", "1", "-b", target_ref, "--", clone_url, dest_dir]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            return
+        # Second attempt: if target_ref is a full commit hash or branch had deep slashes
+        cmd = ["git", "clone", "--depth", "50", "--", clone_url, dest_dir]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(["git", "checkout", target_ref], cwd=dest_dir, capture_output=True, text=True, check=True)
+    else:
+        cmd = ["git", "clone", "--depth", "1", "--", clone_url, dest_dir]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+
 def import_library_asset(
     git_url: str,
     library_path: Optional[str] = None,
     project_path: Optional[str] = None,
     force: bool = False,
     is_core: bool = False,
+    harness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Clones a skill or plugin repository directly into the central skills library.
@@ -278,38 +660,49 @@ def import_library_asset(
     in the central library as a standalone skill.
 
     If executed from within an active project (or if project_path is provided),
-    also immediately provisions the imported capability into that project's .agents/.
+    also immediately provisions the imported capability into that project's .claude/skills/
+    or .agents/skills/ depending on the detected harness.
     """
-    lib_dir = resolve_library_path(library_path)
+    lib_dir = resolve_library_path(library_path, harness=harness)
     os.makedirs(lib_dir, exist_ok=True)
 
-    cleaned_url = git_url.strip().rstrip("/")
+    if not git_url or git_url.strip().startswith("-"):
+        return {
+            "status": "error",
+            "error": f"Invalid git repository URL or flag: {git_url}",
+            "git_url": git_url,
+        }
+
+    cleaned_url = git_url.strip().split("?")[0].split("#")[0].rstrip("/")
     clone_url = cleaned_url
     target_subpath: Optional[str] = None
     target_skill_name: Optional[str] = None
+    target_ref: Optional[str] = None
 
     # Pattern 1: GitHub / GitLab blob or tree URLs
     gh_match = re.match(
-        r"^(https?://(?:github\.com|gitlab\.com)/[^/]+/[^/]+?)(?:/(?:-|blob|tree)/[^/]+(?:/(.*))?)?$",
+        r"^(https?://(?:github\.com|gitlab\.com)/[^/]+/[^/]+?)(?:/(?:-|blob|tree)/([^/]+)(?:/(.*))?)?$",
         cleaned_url,
     )
     # Pattern 2: raw.githubusercontent.com URLs
     raw_match = re.match(
-        r"^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.*)$",
+        r"^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.*)$",
         cleaned_url,
     )
 
     if gh_match:
         base_repo = gh_match.group(1)
         clone_url = base_repo if base_repo.endswith(".git") else base_repo + ".git"
-        sub = gh_match.group(2) or ""
+        target_ref = gh_match.group(2)
+        sub = gh_match.group(3) or ""
         if sub:
             target_subpath = sub
     elif raw_match:
         owner = raw_match.group(1)
         repo = raw_match.group(2)
         clone_url = f"https://github.com/{owner}/{repo}.git"
-        target_subpath = raw_match.group(3)
+        target_ref = raw_match.group(3)
+        target_subpath = raw_match.group(4)
 
     if target_subpath:
         parts = [p for p in target_subpath.split("/") if p and p != "SKILL.md"]
@@ -323,18 +716,18 @@ def import_library_asset(
     else:
         active_project = find_project_root()
 
+    active_harness = detect_harness(active_project, harness) if active_project else "agy"
     project_provisioned: List[Dict[str, Any]] = []
 
     # CASE 1: Targeted skill extracted from repository
     if target_skill_name:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            cmd = ["git", "clone", "--depth", "1", clone_url, tmp_dir]
             try:
-                subprocess.run(cmd, capture_output=True, text=True, check=True)
+                git_clone_ref(clone_url, tmp_dir, target_ref)
             except subprocess.CalledProcessError as e:
                 return {
                     "status": "error",
-                    "error": f"Failed to clone repository from {clone_url}: {e.stderr or e.stdout}",
+                    "error": f"Failed to clone repository from {clone_url} (ref: {target_ref}): {e.stderr or e.stdout}",
                     "git_url": git_url,
                 }
 
@@ -355,13 +748,11 @@ def import_library_asset(
 
             if not candidate_dirs:
                 all_s = glob.glob(os.path.join(tmp_dir, "**", "SKILL.md"), recursive=True)
-                if all_s:
-                    candidate_dirs.append(os.path.dirname(all_s[0]))
-
-            if not candidate_dirs:
+                available = [os.path.basename(os.path.dirname(p)) for p in all_s]
+                avail_str = f" Available skills: {', '.join(available[:10])}" if available else ""
                 return {
                     "status": "error",
-                    "error": f"No skill definition (SKILL.md) found for '{target_skill_name}' in {clone_url}",
+                    "error": f"No skill definition (SKILL.md) found for '{target_skill_name}' in {clone_url}.{avail_str}",
                     "git_url": git_url,
                 }
 
@@ -372,8 +763,16 @@ def import_library_asset(
             except Exception:
                 fm = {}
 
-            canonical_name = fm.get("name") or os.path.basename(src_skill_dir)
-            dest_dir = os.path.join(lib_dir, canonical_name)
+            raw_name = fm.get("name") or os.path.basename(src_skill_dir)
+            clean_name = re.sub(r"[^a-zA-Z0-9._-]", "-", os.path.basename(raw_name.strip())).strip("-.")
+            if not clean_name:
+                clean_name = "custom-skill"
+            canonical_name = clean_name
+
+            dest_dir = os.path.abspath(os.path.join(lib_dir, canonical_name))
+            if os.path.commonpath([dest_dir, lib_dir]) != lib_dir or dest_dir == lib_dir:
+                return {"status": "error", "error": f"Invalid skill destination: {dest_dir}", "git_url": git_url}
+
             already_existed = os.path.exists(dest_dir)
 
             if already_existed and not force:
@@ -381,7 +780,10 @@ def import_library_asset(
                 message = f"Skill '{canonical_name}' already exists in central library: {dest_dir}."
             else:
                 if already_existed and force:
-                    shutil.rmtree(dest_dir)
+                    if os.path.islink(dest_dir):
+                        os.unlink(dest_dir)
+                    else:
+                        shutil.rmtree(dest_dir)
                 shutil.copytree(
                     src_skill_dir,
                     dest_dir,
@@ -393,7 +795,6 @@ def import_library_asset(
 
             is_core_asset = (
                 is_core
-                or canonical_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
                 or fm.get("core") is True
             )
             if is_core_asset:
@@ -404,9 +805,13 @@ def import_library_asset(
                     pass
 
             if active_project and os.path.isdir(active_project):
-                proj_skills_dir = os.path.join(active_project, ".agents", "skills")
+                proj_skills_dir, _ = get_harness_target_paths(active_project, active_harness)
                 os.makedirs(proj_skills_dir, exist_ok=True)
-                proj_dest_dir = os.path.join(proj_skills_dir, canonical_name)
+                proj_dest_dir = os.path.abspath(os.path.join(proj_skills_dir, canonical_name))
+                if os.path.commonpath([proj_dest_dir, proj_skills_dir]) != proj_skills_dir or proj_dest_dir == proj_skills_dir:
+                    return {"status": "error", "error": f"Invalid project destination: {proj_dest_dir}", "git_url": git_url}
+                if os.path.islink(proj_dest_dir):
+                    os.unlink(proj_dest_dir)
                 shutil.copytree(
                     dest_dir,
                     proj_dest_dir,
@@ -429,6 +834,7 @@ def import_library_asset(
                     "files_copied": file_count,
                     "status": "provisioned",
                 })
+                sync_project_docs(active_project, active_harness)
 
             return {
                 "status": status,
@@ -441,15 +847,23 @@ def import_library_asset(
                 "project_path": active_project,
                 "project_provisioned": project_provisioned,
                 "is_core": is_core_asset,
+                "harness": active_harness,
                 "message": message,
             }
 
     # CASE 2: Whole repository import (plugin, package, or standalone repo)
-    repo_name = os.path.basename(clone_url)
-    if repo_name.endswith(".git"):
-        repo_name = repo_name[:-4]
+    clean_repo_name = os.path.basename(clone_url.rstrip("/\\"))
+    if clean_repo_name.endswith(".git"):
+        clean_repo_name = clean_repo_name[:-4]
+    clean_repo_name = re.sub(r"[^a-zA-Z0-9._-]", "-", clean_repo_name).strip("-.")
+    if not clean_repo_name or clean_repo_name in (".", ".."):
+        return {"status": "error", "error": f"Invalid repository URL: {git_url}", "git_url": git_url}
 
-    dest_dir = os.path.join(lib_dir, repo_name)
+    repo_name = clean_repo_name
+    dest_dir = os.path.abspath(os.path.join(lib_dir, repo_name))
+    if os.path.commonpath([dest_dir, lib_dir]) != lib_dir or dest_dir == lib_dir:
+        return {"status": "error", "error": f"Destination escapes skills library: {dest_dir}", "git_url": git_url}
+
     already_existed = os.path.exists(dest_dir)
     status = "installed"
     message = ""
@@ -459,11 +873,13 @@ def import_library_asset(
         message = f"Asset '{repo_name}' already exists in library: {dest_dir}."
     else:
         if already_existed and force:
-            shutil.rmtree(dest_dir)
+            if os.path.islink(dest_dir):
+                os.unlink(dest_dir)
+            else:
+                shutil.rmtree(dest_dir)
 
-        cmd = ["git", "clone", "--depth", "1", clone_url, dest_dir]
         try:
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            git_clone_ref(clone_url, dest_dir, target_ref)
             status = "installed"
             message = f"Installed '{repo_name}' into central library: {dest_dir}."
         except subprocess.CalledProcessError as e:
@@ -476,10 +892,7 @@ def import_library_asset(
     is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
     skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
 
-    is_core_asset = (
-        is_core
-        or repo_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-    )
+    is_core_asset = is_core
     if is_core_asset:
         try:
             with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
@@ -492,8 +905,10 @@ def import_library_asset(
             project_path=active_project,
             asset_names=[repo_name],
             library_path=lib_dir,
+            harness=active_harness,
         )
         project_provisioned = prov_res.get("provisioned", [])
+        sync_project_docs(active_project, active_harness)
 
     return {
         "status": status,
@@ -577,12 +992,12 @@ def parse_plugin_manifest(plugin_json_path: str) -> Dict[str, Any]:
 # Armory Cataloging (Natural Package & Plugin Discovery)
 # ==============================================================================
 
-def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
+def get_catalog(library_path: Optional[str] = None, harness: Optional[str] = None) -> Dict[str, Any]:
     """
     Discovers all packages, plugins, and skills in the configured skills-library.
     Groups naturally by Package / Plugin on disk.
     """
-    lib_dir = resolve_library_path(library_path)
+    lib_dir = resolve_library_path(library_path, harness=harness)
     if not os.path.exists(lib_dir):
         return {
             "library_path": lib_dir,
@@ -631,19 +1046,11 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 
             has_core_file = os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
             is_core_manifest = manifest_data.get("core") is True
-            is_conventional_core_plugin = (
-                plugin_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-                or pkg.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
-            )
-            if is_conventional_core_plugin and not has_core_file:
-                try:
-                    with open(os.path.join(pkg_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                        f.write("# Quartermaster Core Capability\n")
-                    has_core_file = True
-                except Exception:
-                    pass
+            p_tier = "core" if (has_core_file or is_core_manifest) else "stack"
 
-            p_tier = "core" if (has_core_file or is_core_manifest or is_conventional_core_plugin) else "stack"
+            plugin_tags = manifest_data.get("tags", [])
+            if not plugin_tags:
+                plugin_tags = [w for w in re.split(r"[-_\s]+", plugin_name.lower()) if len(w) > 2]
 
             plugin_info = {
                 "name": plugin_name,
@@ -651,6 +1058,7 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
                 "tier": p_tier,
                 "version": plugin_version,
                 "description": plugin_desc,
+                "tags": plugin_tags,
                 "source_dir": pkg_dir,
                 "manifest_file": plugin_manifest_path,
                 "components": components,
@@ -673,27 +1081,15 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
             desc = meta.get("description") or "No description available."
             version = meta.get("version")
             tags = meta.get("tags", [])
+            if not tags:
+                tags = [w for w in re.split(r"[-_\s]+", name.lower()) if len(w) > 2]
 
             has_core_file = (
                 os.path.exists(os.path.join(skill_dir, CORE_MARKER_FILE))
                 or os.path.exists(os.path.join(pkg_dir, CORE_MARKER_FILE))
             )
             is_core_frontmatter = meta.get("core") is True
-            norm_skill_name = name.lower().replace("_", "-")
-            norm_dir_name = os.path.basename(skill_dir).lower().replace("_", "-")
-            is_conventional_core_skill = (
-                norm_skill_name in CONVENTIONAL_CORE_NAMES
-                or norm_dir_name in CONVENTIONAL_CORE_NAMES
-            )
-            if is_conventional_core_skill and not has_core_file:
-                try:
-                    with open(os.path.join(skill_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                        f.write("# Quartermaster Core Capability\n")
-                    has_core_file = True
-                except Exception:
-                    pass
-
-            s_tier = "core" if (has_core_file or is_core_frontmatter or is_conventional_core_skill) else "stack"
+            s_tier = "core" if (has_core_file or is_core_frontmatter) else "stack"
 
             subdirs = [
                 d for d in os.listdir(skill_dir)
@@ -739,7 +1135,11 @@ def get_catalog(library_path: Optional[str] = None) -> Dict[str, Any]:
 # Workspace Reconnaissance & Stack Matching
 # ==============================================================================
 
-def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[str, Any]:
+def detect_stack(
+    project_path: str,
+    library_path: Optional[str] = None,
+    harness: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Scans project root and subdirectories for manifest files.
     Identifies frameworks, detects uninitialized projects,
@@ -794,180 +1194,244 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
         except Exception:
             return ""
 
-    # Flutter / Dart (pubspec.yaml)
-    pubspec_path = os.path.join(proj_dir, "pubspec.yaml")
-    if os.path.exists(pubspec_path):
-        manifests_found.append("pubspec.yaml")
-        content = safe_read(pubspec_path)
-        tech_details = ["Dart"]
-        if "flutter:" in content or "sdk: flutter" in content:
-            tech_details.append("Flutter SDK")
-
-        technologies.append({
-            "name": "Flutter / Dart",
-            "manifest": "pubspec.yaml",
-            "details": ", ".join(tech_details),
-        })
-
-        add_plugin_rec("flutter", "stack", "Flutter architecture, responsive layouts, and Dart unit testing")
-        add_skill_rec("flutter-apply-architecture-best-practices", "flutter", "stack", "Architecture and structure standards for Flutter")
-        add_skill_rec("dart-add-unit-test", "flutter", "core", "Unit test doubles, fixtures, and assertions for Dart")
-        add_skill_rec("flutter-build-responsive-layout", "flutter", "stack", "Responsive layout patterns across devices")
-
-        if "http:" in content or "dio:" in content:
-            add_skill_rec("flutter-use-http-package", "flutter", "stack", "HTTP networking patterns")
-        if "json_annotation:" in content or "json_serializable:" in content:
-            add_skill_rec("flutter-implement-json-serialization", "flutter", "stack", "JSON code generation and serialization")
-        if "go_router:" in content or "auto_route:" in content:
-            add_skill_rec("flutter-setup-declarative-routing", "flutter", "stack", "Declarative routing patterns")
-
-    # Android Native
-    android_dir = os.path.join(proj_dir, "android")
-    has_gradle = (
-        os.path.exists(os.path.join(proj_dir, "build.gradle"))
-        or os.path.exists(os.path.join(proj_dir, "build.gradle.kts"))
-        or (os.path.exists(android_dir) and os.path.isdir(android_dir))
-    )
-    if has_gradle:
-        manifest_name = "android/ or build.gradle"
-        manifests_found.append(manifest_name)
-        technologies.append({
-            "name": "Android Native / Gradle",
-            "manifest": manifest_name,
-            "details": "Android Gradle build system and device tools",
-        })
-        add_plugin_rec("android-cli-plugin", "stack", "Android CLI management, emulators, logcat, and APK builds")
-
-    # Node.js / Web / TypeScript (package.json)
-    package_json_path = os.path.join(proj_dir, "package.json")
-    if os.path.exists(package_json_path):
-        manifests_found.append("package.json")
-        content = safe_read(package_json_path)
-        frameworks = []
-
-        if "react" in content:
-            frameworks.append("React")
-        if "next" in content:
-            frameworks.append("Next.js")
-        if "vue" in content:
-            frameworks.append("Vue")
-        if "svelte" in content:
-            frameworks.append("Svelte")
-        if "tailwind" in content or os.path.exists(os.path.join(proj_dir, "tailwind.config.js")):
-            frameworks.append("Tailwind CSS")
-        if "vite" in content:
-            frameworks.append("Vite")
-        if "express" in content:
-            frameworks.append("Express")
-        if "fastify" in content:
-            frameworks.append("Fastify")
-        if os.path.exists(os.path.join(proj_dir, "tsconfig.json")):
-            frameworks.append("TypeScript")
-
-        details_str = ", ".join(frameworks) if frameworks else "JavaScript/Node.js"
-        technologies.append({
-            "name": "Web & Node.js Platform",
-            "manifest": "package.json",
-            "details": details_str,
-        })
-
-        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
-        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
-        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
-    elif os.path.exists(os.path.join(proj_dir, "index.html")):
-        manifests_found.append("index.html")
-        technologies.append({
-            "name": "Static Web / HTML",
-            "manifest": "index.html",
-            "details": "Static HTML/CSS/JavaScript",
-        })
-        add_skill_rec("impeccable", "impeccable", "stack", "Frontend design craft, layout polish, UX audit, and component refinement")
-        add_plugin_rec("modern-web-guidance-plugin", "stack", "Modern web architecture standards, clean idioms, and web performance")
-        add_plugin_rec("chrome-devtools-plugin", "stack", "Chrome DevTools MCP runtime inspection and debugging")
-
-    # Chrome Extension (manifest.json)
-    manifest_json_path = os.path.join(proj_dir, "manifest.json")
-    if os.path.exists(manifest_json_path):
-        content = safe_read(manifest_json_path)
-        if "manifest_version" in content:
-            manifests_found.append("manifest.json")
-            technologies.append({
-                "name": "Chrome Extension",
-                "manifest": "manifest.json",
-                "details": "Chrome Extension manifest (v2/v3)",
-            })
-            add_skill_rec("chrome-extensions", "modern-web-guidance-plugin", "stack", "Chrome extension architecture, permissions, and background workers")
-            add_plugin_rec("chrome-devtools-plugin", "stack", "DevTools inspection of popups and content scripts")
-
-    # Firebase (firebase.json, .firebaserc)
-    firebase_json_path = os.path.join(proj_dir, "firebase.json")
-    firebaserc_path = os.path.join(proj_dir, ".firebaserc")
-    if os.path.exists(firebase_json_path) or os.path.exists(firebaserc_path):
-        manifest_name = "firebase.json" if os.path.exists(firebase_json_path) else ".firebaserc"
-        manifests_found.append(manifest_name)
-        technologies.append({
-            "name": "Firebase Platform",
-            "manifest": manifest_name,
-            "details": "Cloud Firestore, Auth, Hosting, and Security Rules",
-        })
-        add_plugin_rec("firebase", "stack", "Firebase Firestore, Auth, Hosting, and Security Rules")
-        add_skill_rec("firebase-basics", "firebase", "stack", "Firebase CLI, project initialization, and emulator suite")
-        add_skill_rec("firebase-firestore", "firebase", "stack", "Firestore schema design, querying, and transactions")
-        add_skill_rec("firebase-security-rules-auditor", "firebase", "core", "Audit and hardening of Firestore & Cloud Storage security rules")
-
-    # Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
-    py_manifests = [
-        m for m in [
-            os.path.join(proj_dir, "pyproject.toml"),
-            os.path.join(proj_dir, "requirements.txt"),
-            os.path.join(proj_dir, "Pipfile"),
-            os.path.join(proj_dir, "setup.py"),
-        ]
-        if os.path.exists(m)
-    ]
-    if py_manifests:
-        primary_py = os.path.basename(py_manifests[0])
-        manifests_found.append(primary_py)
-        combined_py = " ".join([safe_read(m) for m in py_manifests]).lower()
-
-        py_details = ["Python 3"]
-        if "fastapi" in combined_py:
-            py_details.append("FastAPI")
-        if "flask" in combined_py:
-            py_details.append("Flask")
-        if "django" in combined_py:
-            py_details.append("Django")
-
-        technologies.append({
-            "name": "Python Environment",
-            "manifest": primary_py,
-            "details": ", ".join(py_details),
-        })
-
-        add_skill_rec("uv", "science", "stack", "Ultra-fast Python package management and virtual environments via uv")
-
-        if any(kw in combined_py for kw in ["antigravity", "google-genai", "gemini"]) or os.path.exists(os.path.join(proj_dir, "agents")):
-            add_plugin_rec("google-antigravity-sdk", "stack", "Antigravity SDK for multi-agent workflows, subagents, and tool execution")
-
-    # Containers / Docker
-    if os.path.exists(os.path.join(proj_dir, "Dockerfile")) or os.path.exists(os.path.join(proj_dir, "docker-compose.yml")):
-        doc_manifest = "Dockerfile" if os.path.exists(os.path.join(proj_dir, "Dockerfile")) else "docker-compose.yml"
-        manifests_found.append(doc_manifest)
-        technologies.append({
-            "name": "Containerization / Docker",
-            "manifest": doc_manifest,
-            "details": "Container build specifications and multi-service definitions",
-        })
-        add_plugin_rec("cloudrun", "stack", "Serverless container deployment and traffic routing")
-
-    # Dynamic Core Baseline Capabilities (Equipped for any repository)
-    lib_path = resolve_library_path(library_path)
+    # 1. Search directories (root + depth 1 subdirectories for monorepos)
+    search_dirs = [proj_dir]
     try:
-        catalog = get_catalog(lib_path)
+        for entry in sorted(os.listdir(proj_dir)):
+            ep = os.path.join(proj_dir, entry)
+            if os.path.isdir(ep) and not entry.startswith(".") and entry not in (
+                "node_modules", "target", "build", "dist", ".git", ".venv", "venv", "__pycache__"
+            ):
+                search_dirs.append(ep)
+    except Exception:
+        pass
+
+    detected_tech_tags: Set[str] = set()
+
+    for s_dir in search_dirs:
+        rel_prefix = "" if s_dir == proj_dir else f"{os.path.basename(s_dir)}/"
+
+        # Flutter / Dart (pubspec.yaml)
+        pubspec_path = os.path.join(s_dir, "pubspec.yaml")
+        if os.path.exists(pubspec_path):
+            m_name = f"{rel_prefix}pubspec.yaml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                content = safe_read(pubspec_path)
+                tech_details = ["Dart"]
+                if "flutter:" in content or "sdk: flutter" in content:
+                    tech_details.append("Flutter SDK")
+                technologies.append({
+                    "name": "Flutter / Dart",
+                    "manifest": m_name,
+                    "details": ", ".join(tech_details),
+                    "tags": ["flutter", "dart", "mobile"],
+                })
+                detected_tech_tags.update(["flutter", "dart", "mobile"])
+
+        # Android Native / Gradle
+        android_dir = os.path.join(s_dir, "android")
+        has_gradle = (
+            os.path.exists(os.path.join(s_dir, "build.gradle"))
+            or os.path.exists(os.path.join(s_dir, "build.gradle.kts"))
+            or (os.path.exists(android_dir) and os.path.isdir(android_dir))
+        )
+        if has_gradle:
+            m_name = f"{rel_prefix}build.gradle"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Android Native / Gradle",
+                    "manifest": m_name,
+                    "details": "Android Gradle build system and device tools",
+                    "tags": ["android", "mobile", "gradle"],
+                })
+                detected_tech_tags.update(["android", "mobile", "gradle"])
+
+        # Apple iOS / Swift
+        has_ios = (
+            os.path.exists(os.path.join(s_dir, "Podfile"))
+            or os.path.exists(os.path.join(s_dir, "Package.swift"))
+            or any(f.endswith(".xcodeproj") or f.endswith(".xcworkspace") for f in os.listdir(s_dir) if os.path.exists(s_dir) and os.path.isdir(s_dir))
+        )
+        if has_ios:
+            m_name = f"{rel_prefix}Package.swift / Xcode"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Apple iOS / Swift",
+                    "manifest": m_name,
+                    "details": "Swift / Xcode project and Apple toolchain",
+                    "tags": ["ios", "swift", "apple", "mobile", "xcode"],
+                })
+                detected_tech_tags.update(["ios", "swift", "apple", "mobile", "xcode"])
+
+        # Node.js / Web / TypeScript (package.json)
+        pkg_json = os.path.join(s_dir, "package.json")
+        if os.path.exists(pkg_json):
+            m_name = f"{rel_prefix}package.json"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                content = safe_read(pkg_json)
+                frameworks = []
+                w_tags = ["web", "frontend", "node", "javascript", "typescript"]
+                if "react" in content:
+                    frameworks.append("React")
+                    w_tags.append("react")
+                if "next" in content:
+                    frameworks.append("Next.js")
+                    w_tags.append("next")
+                if "vue" in content:
+                    frameworks.append("Vue")
+                    w_tags.append("vue")
+                if "svelte" in content:
+                    frameworks.append("Svelte")
+                    w_tags.append("svelte")
+                if "tailwind" in content or os.path.exists(os.path.join(s_dir, "tailwind.config.js")):
+                    frameworks.append("Tailwind CSS")
+                    w_tags.append("tailwind")
+                if "vite" in content:
+                    frameworks.append("Vite")
+                    w_tags.append("vite")
+                if "express" in content:
+                    frameworks.append("Express")
+                if "fastify" in content:
+                    frameworks.append("Fastify")
+                if os.path.exists(os.path.join(s_dir, "tsconfig.json")):
+                    frameworks.append("TypeScript")
+
+                details_str = ", ".join(frameworks) if frameworks else "JavaScript/Node.js"
+                technologies.append({
+                    "name": "Web & Node.js Platform",
+                    "manifest": m_name,
+                    "details": details_str,
+                    "tags": w_tags,
+                })
+                detected_tech_tags.update(w_tags)
+
+        elif os.path.exists(os.path.join(s_dir, "index.html")) and s_dir == proj_dir:
+            manifests_found.append("index.html")
+            technologies.append({
+                "name": "Static Web / HTML",
+                "manifest": "index.html",
+                "details": "Static HTML/CSS/JavaScript",
+                "tags": ["web", "frontend", "html", "css"],
+            })
+            detected_tech_tags.update(["web", "frontend", "html", "css"])
+
+        # Chrome Extension (manifest.json)
+        manifest_json_path = os.path.join(s_dir, "manifest.json")
+        if os.path.exists(manifest_json_path):
+            content = safe_read(manifest_json_path)
+            if "manifest_version" in content:
+                m_name = f"{rel_prefix}manifest.json"
+                if m_name not in manifests_found:
+                    manifests_found.append(m_name)
+                    technologies.append({
+                        "name": "Chrome Extension",
+                        "manifest": m_name,
+                        "details": "Chrome Extension manifest (v2/v3)",
+                        "tags": ["chrome-extension", "chrome", "web", "browser"],
+                    })
+                    detected_tech_tags.update(["chrome-extension", "chrome", "web", "browser"])
+
+        # Firebase (firebase.json, .firebaserc)
+        fb_json = os.path.join(s_dir, "firebase.json")
+        fb_rc = os.path.join(s_dir, ".firebaserc")
+        if os.path.exists(fb_json) or os.path.exists(fb_rc):
+            m_name = f"{rel_prefix}firebase.json" if os.path.exists(fb_json) else f"{rel_prefix}.firebaserc"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Firebase Platform",
+                    "manifest": m_name,
+                    "details": "Cloud Firestore, Auth, Hosting, and Security Rules",
+                    "tags": ["firebase", "backend", "cloud"],
+                })
+                detected_tech_tags.update(["firebase", "backend", "cloud"])
+
+        # Python (pyproject.toml, requirements.txt, Pipfile, setup.py)
+        py_files = [
+            f for f in ["pyproject.toml", "requirements.txt", "Pipfile", "setup.py"]
+            if os.path.exists(os.path.join(s_dir, f))
+        ]
+        if py_files:
+            primary_py = f"{rel_prefix}{py_files[0]}"
+            if primary_py not in manifests_found:
+                manifests_found.append(primary_py)
+                combined_py = " ".join([safe_read(os.path.join(s_dir, f)) for f in py_files]).lower()
+                py_details = ["Python 3"]
+                py_tags = ["python", "backend"]
+                if "fastapi" in combined_py:
+                    py_details.append("FastAPI")
+                    py_tags.append("fastapi")
+                if "flask" in combined_py:
+                    py_details.append("Flask")
+                    py_tags.append("flask")
+                if "django" in combined_py:
+                    py_details.append("Django")
+                    py_tags.append("django")
+
+                technologies.append({
+                    "name": "Python Environment",
+                    "manifest": primary_py,
+                    "details": ", ".join(py_details),
+                    "tags": py_tags,
+                })
+                detected_tech_tags.update(py_tags)
+
+        # Rust (Cargo.toml)
+        cargo_path = os.path.join(s_dir, "Cargo.toml")
+        if os.path.exists(cargo_path):
+            m_name = f"{rel_prefix}Cargo.toml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Rust Platform",
+                    "manifest": m_name,
+                    "details": "Rust Cargo package specification",
+                    "tags": ["rust"],
+                })
+                detected_tech_tags.update(["rust"])
+
+        # Go (go.mod)
+        go_mod_path = os.path.join(s_dir, "go.mod")
+        if os.path.exists(go_mod_path):
+            m_name = f"{rel_prefix}go.mod"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Go Platform",
+                    "manifest": m_name,
+                    "details": "Go module definition",
+                    "tags": ["go", "golang"],
+                })
+                detected_tech_tags.update(["go", "golang"])
+
+        # Containers / Docker
+        dockerfile = os.path.join(s_dir, "Dockerfile")
+        compose = os.path.join(s_dir, "docker-compose.yml")
+        if os.path.exists(dockerfile) or os.path.exists(compose):
+            m_name = f"{rel_prefix}Dockerfile" if os.path.exists(dockerfile) else f"{rel_prefix}docker-compose.yml"
+            if m_name not in manifests_found:
+                manifests_found.append(m_name)
+                technologies.append({
+                    "name": "Containerization / Docker",
+                    "manifest": m_name,
+                    "details": "Container build specifications and multi-service definitions",
+                    "tags": ["docker", "container", "devops", "cloud"],
+                })
+                detected_tech_tags.update(["docker", "container", "devops", "cloud"])
+
+    # 3. Dynamic Catalog Recommendations
+    active_h = detect_harness(proj_dir, harness)
+    lib_path = resolve_library_path(library_path, harness=active_h)
+    try:
+        catalog = get_catalog(lib_path, harness=active_h)
     except Exception:
         catalog = {}
 
-    core_found = False
+    # Core Baseline Capabilities from Catalog (.core marker or tier == "core")
     for p in catalog.get("plugins", []):
         if p.get("tier") == "core":
             add_plugin_rec(
@@ -976,7 +1440,6 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
                 p.get("description") or "Universal core workflow plugin",
                 priority="Baseline",
             )
-            core_found = True
 
     for s in catalog.get("skills", []):
         if s.get("tier") == "core":
@@ -987,18 +1450,64 @@ def detect_stack(project_path: str, library_path: Optional[str] = None) -> Dict[
                 s.get("description") or "Universal core workflow capability",
                 priority="Baseline",
             )
-            core_found = True
 
-    # Fallback to conventional baseline skills if armory catalog has no core markers yet
-    if not core_found:
-        conventional_defaults = [
-            ("spec", "Spec-driven engineering: write clear functional specs before writing code"),
-            ("pr-review", "Adversarial pull request critique, bug detection, and regression guard"),
-            ("preflight", "Pre-commit sanity verification, lint checks, and test runner assurance"),
-            ("wayfinder", "Deep codebase navigation, dependency mapping, and orientation"),
-        ]
-        for c_name, c_desc in conventional_defaults:
-            add_skill_rec(c_name, "", "core", c_desc, priority="Baseline")
+    # Dynamic Stack-Matched Capabilities from Catalog
+    def matches_tags(name: str, pkg: str, item_tags: List[str], desc: str, target_tags: Set[str]) -> Tuple[bool, str]:
+        norm_n = name.lower().replace("_", "-")
+        norm_p = pkg.lower().replace("_", "-")
+        norm_d = desc.lower()
+
+        for it in item_tags:
+            t_clean = str(it).lower().replace("_", "-")
+            if t_clean in target_tags:
+                return True, f"Matched tag '{t_clean}'"
+
+        for tt in target_tags:
+            if len(tt) > 2 and (tt in norm_n or tt in norm_p):
+                return True, f"Matched technology '{tt}'"
+            if len(tt) > 3 and re.search(r"\b" + re.escape(tt) + r"\b", norm_d):
+                return True, f"Matched capability description mentioning '{tt}'"
+
+        return False, ""
+
+    if detected_tech_tags:
+        for p in catalog.get("plugins", []):
+            if p.get("tier") == "core":
+                continue
+            matched, reason = matches_tags(
+                p["name"],
+                p.get("package", ""),
+                p.get("tags", []),
+                p.get("description", ""),
+                detected_tech_tags,
+            )
+            if matched:
+                add_plugin_rec(
+                    p["name"],
+                    "stack",
+                    p.get("description") or f"Plugin matched to workspace: {reason}",
+                    priority="High",
+                )
+
+        for s in catalog.get("skills", []):
+            if s.get("tier") == "core":
+                continue
+            matched, reason = matches_tags(
+                s["name"],
+                s.get("package", ""),
+                s.get("tags", []),
+                s.get("description", ""),
+                detected_tech_tags,
+            )
+            if matched:
+                add_skill_rec(
+                    s["name"],
+                    s.get("package", ""),
+                    "stack",
+                    s.get("description") or f"Skill matched to workspace: {reason}",
+                    priority="High",
+                )
+
 
     is_brand_new = False
     if not manifests_found:
@@ -1051,19 +1560,20 @@ def provision_assets(
     asset_names: List[str],
     library_path: Optional[str] = None,
     force_type: Optional[str] = None,
+    harness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Provisions requested assets into `<project_path>/.agents/`.
-    - Full plugins &rarr; `<project_path>/.agents/plugins/<plugin_name>/`
-    - Standalone skills &rarr; `<project_path>/.agents/skills/<skill_name>/`
+    Provisions requested assets into project capability directories:
+    - claude: <project>/.claude/skills/
+    - agy / codex: <project>/.agents/skills/ and <project>/.agents/plugins/
     """
     proj_dir = os.path.abspath(os.path.expanduser(project_path))
     os.makedirs(proj_dir, exist_ok=True)
 
-    target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-    target_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
+    active_harness = detect_harness(proj_dir, harness)
+    target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
-    catalog = get_catalog(library_path)
+    catalog = get_catalog(library_path, harness=active_harness)
     all_skills = catalog.get("skills", [])
     all_plugins = catalog.get("plugins", [])
 
@@ -1107,37 +1617,122 @@ def provision_assets(
         if is_plugin_match and force_type != "skill":
             plugin = plugin_map[req_norm]
             canonical_name = plugin["name"]
-            dest_dir = os.path.join(target_plugins_dir, canonical_name)
+            src_dir = plugin["source_dir"]
+            is_core_plugin = (plugin["tier"] == "core")
 
-            if dest_dir not in seen_destinations:
-                seen_destinations.add(dest_dir)
-                os.makedirs(target_plugins_dir, exist_ok=True)
-                src_dir = plugin["source_dir"]
-                shutil.copytree(
-                    src_dir,
-                    dest_dir,
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
-                )
+            if target_plugins_dir:
+                # Harness supports separate plugins directory (.agents/plugins/)
+                dest_dir = os.path.join(target_plugins_dir, canonical_name)
+                if dest_dir not in seen_destinations:
+                    seen_destinations.add(dest_dir)
+                    os.makedirs(target_plugins_dir, exist_ok=True)
+                    shutil.copytree(
+                        src_dir,
+                        dest_dir,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                    )
 
-                if plugin["tier"] == "core":
-                    try:
-                        with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
+                    if is_core_plugin:
+                        try:
+                            with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                f.write("# Quartermaster Core Capability\n")
+                        except Exception:
+                            pass
 
-                file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
-                provisioned.append({
-                    "name": canonical_name,
-                    "type": "plugin",
-                    "package": plugin["package"],
-                    "tier": plugin["tier"],
-                    "source": src_dir,
-                    "destination": dest_dir,
-                    "files_copied": file_count,
-                    "status": "provisioned",
-                })
+                    file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                    provisioned.append({
+                        "name": canonical_name,
+                        "type": "plugin",
+                        "package": plugin["package"],
+                        "tier": plugin["tier"],
+                        "source": src_dir,
+                        "destination": dest_dir,
+                        "files_copied": file_count,
+                        "status": "provisioned",
+                    })
+            else:
+                # Harness only discovers top-level skills with SKILL.md (e.g. Claude Code in .claude/skills/)
+                # Unpack inner skills directly into target_skills_dir/<inner_skill_name>/ to avoid invisible husks
+                pkg_key = plugin["package"].lower()
+                matching_inner_skills = list(skill_by_pkg.get(pkg_key, []))
+
+                # Also look directly for skills/ directory inside plugin source
+                inner_skills_dir = os.path.join(src_dir, "skills")
+                if os.path.isdir(inner_skills_dir):
+                    for sub in sorted(os.listdir(inner_skills_dir)):
+                        sub_path = os.path.join(inner_skills_dir, sub)
+                        if os.path.isdir(sub_path) and os.path.exists(os.path.join(sub_path, "SKILL.md")):
+                            if not any(s.get("dir_name") == sub or s.get("name") == sub for s in matching_inner_skills):
+                                matching_inner_skills.append({
+                                    "name": sub,
+                                    "dir_name": sub,
+                                    "package": plugin["package"],
+                                    "tier": plugin["tier"],
+                                    "source_dir": sub_path,
+                                })
+
+                if matching_inner_skills:
+                    for inner_s in matching_inner_skills:
+                        inner_name = inner_s["name"]
+                        dest_dir = os.path.join(target_skills_dir, inner_name)
+                        if dest_dir not in seen_destinations:
+                            seen_destinations.add(dest_dir)
+                            os.makedirs(target_skills_dir, exist_ok=True)
+                            shutil.copytree(
+                                inner_s["source_dir"],
+                                dest_dir,
+                                dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                            )
+                            if is_core_plugin or (inner_s.get("tier") == "core"):
+                                try:
+                                    with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                        f.write("# Quartermaster Core Capability\n")
+                                except Exception:
+                                    pass
+
+                            file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                            provisioned.append({
+                                "name": inner_name,
+                                "type": "skill",
+                                "package": plugin["package"],
+                                "tier": "core" if is_core_plugin else inner_s.get("tier", "stack"),
+                                "source": inner_s["source_dir"],
+                                "destination": dest_dir,
+                                "files_copied": file_count,
+                                "status": "provisioned",
+                            })
+                elif os.path.exists(os.path.join(src_dir, "SKILL.md")):
+                    # Standalone plugin with a top-level SKILL.md
+                    dest_dir = os.path.join(target_skills_dir, canonical_name)
+                    if dest_dir not in seen_destinations:
+                        seen_destinations.add(dest_dir)
+                        os.makedirs(target_skills_dir, exist_ok=True)
+                        shutil.copytree(
+                            src_dir,
+                            dest_dir,
+                            dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+                        )
+                        if is_core_plugin:
+                            try:
+                                with open(os.path.join(dest_dir, CORE_MARKER_FILE), "w", encoding="utf-8") as f:
+                                    f.write("# Quartermaster Core Capability\n")
+                            except Exception:
+                                pass
+                        file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+                        provisioned.append({
+                            "name": canonical_name,
+                            "type": "skill",
+                            "package": plugin["package"],
+                            "tier": plugin["tier"],
+                            "source": src_dir,
+                            "destination": dest_dir,
+                            "files_copied": file_count,
+                            "status": "provisioned",
+                        })
+
             handled = True
 
         # Route 2: Standalone Skill Provisioning
@@ -1216,8 +1811,12 @@ def provision_assets(
         if not handled:
             not_found.append(req)
 
+    synced_docs = sync_project_docs(proj_dir, active_harness)
+
     return {
         "project_path": proj_dir,
+        "harness": active_harness,
+        "synced_docs": synced_docs,
         "requested": expanded_requests,
         "provisioned": provisioned,
         "provisioned_count": len(provisioned),
@@ -1236,22 +1835,35 @@ def sweep_project(
     suggest_pruning: Optional[bool] = None,
     auto_prune: Optional[bool] = None,
     pruning_mode: Optional[str] = None,
+    harness: Optional[str] = None,
+    check_only: bool = False,
 ) -> Dict[str, Any]:
     """
     Audits the workspace:
-    1. Checks active inventory in `.agents/`.
+    1. Checks active inventory in project capability directories (.claude/skills/ or .agents/).
     2. Re-scans manifests and dependencies.
     3. Identifies newly relevant additions:
-       - If auto_add is True (default): automatically provisions them into `.agents/`.
+       - If auto_add is True and check_only is False: automatically provisions them.
     4. Evaluates unneeded stack tools:
        - Pruning mode can be 'aggressive' (strict stack alignment) or 'soft' (conservative retention).
        - If suggest_pruning is True: lists them as removal recommendations.
-       - If auto_prune is True: automatically uninstalls them from `.agents/`.
+       - If auto_prune is True and check_only is False: automatically uninstalls them.
     """
-    cfg = load_config()
-    final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
-    final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
-    final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
+    proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    active_harness = detect_harness(proj_dir, harness)
+    cfg = load_config(active_harness)
+
+    if check_only:
+        final_auto_add = False
+        final_auto_prune = False
+        final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
+    else:
+        final_auto_add = auto_add if auto_add is not None else cfg.get("auto-add", True)
+        final_suggest_pruning = suggest_pruning if suggest_pruning is not None else cfg.get("suggest-pruning", True)
+        if auto_prune is False:
+            final_auto_prune = False
+        else:
+            final_auto_prune = auto_prune if auto_prune is not None else cfg.get("auto-prune", False)
 
     raw_mode = (
         pruning_mode
@@ -1262,45 +1874,32 @@ def sweep_project(
     if final_pruning_mode not in ("aggressive", "soft"):
         final_pruning_mode = "aggressive"
 
-    proj_dir = os.path.abspath(os.path.expanduser(project_path))
-    scan = detect_stack(proj_dir, library_path=library_path)
-    catalog = get_catalog(library_path)
+    scan = detect_stack(proj_dir, library_path=library_path, harness=active_harness)
+    catalog = get_catalog(library_path, harness=active_harness)
 
-    target_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-    target_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
+    target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
 
     installed_skills: List[Dict[str, Any]] = []
-    if os.path.exists(target_skills_dir):
+    husk_dirs: List[str] = []
+    if target_skills_dir and os.path.exists(target_skills_dir):
         for s_name in sorted(os.listdir(target_skills_dir)):
             s_path = os.path.join(target_skills_dir, s_name)
             if os.path.isdir(s_path):
-                s_norm = s_name.lower().replace("_", "-")
-                core_marker = os.path.join(s_path, CORE_MARKER_FILE)
-                if not os.path.exists(core_marker) and s_norm in CONVENTIONAL_CORE_NAMES:
-                    try:
-                        with open(core_marker, "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
-                installed_skills.append({
-                    "name": s_name,
-                    "path": s_path,
-                    "type": "skill",
-                })
+                has_skill_md = os.path.exists(os.path.join(s_path, "SKILL.md"))
+                if has_skill_md:
+                    installed_skills.append({
+                        "name": s_name,
+                        "path": s_path,
+                        "type": "skill",
+                    })
+                else:
+                    husk_dirs.append(s_path)
 
     installed_plugins: List[Dict[str, Any]] = []
-    if os.path.exists(target_plugins_dir):
+    if target_plugins_dir and os.path.exists(target_plugins_dir):
         for p_name in sorted(os.listdir(target_plugins_dir)):
             p_path = os.path.join(target_plugins_dir, p_name)
             if os.path.isdir(p_path):
-                p_norm = p_name.lower().replace("_", "-")
-                core_marker = os.path.join(p_path, CORE_MARKER_FILE)
-                if not os.path.exists(core_marker) and p_norm in CONVENTIONAL_CORE_NAMES:
-                    try:
-                        with open(core_marker, "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
                 installed_plugins.append({
                     "name": p_name,
                     "path": p_path,
@@ -1315,6 +1914,16 @@ def sweep_project(
     for rec_plugin in scan.get("recommended_plugins", []):
         p_name = rec_plugin["name"].lower()
         if p_name not in installed_plugin_names:
+            if not target_plugins_dir:
+                # In harnesses without dedicated plugin folders (e.g. Claude Code), plugins unpack into skills
+                p_pkg = (rec_plugin.get("package") or rec_plugin["name"]).lower()
+                pkg_skills = [
+                    s["name"].lower()
+                    for s in catalog.get("skills", [])
+                    if (s.get("package") or "").lower() == p_pkg
+                ]
+                if pkg_skills and all(s in installed_skill_names for s in pkg_skills):
+                    continue
             additions.append({
                 "name": rec_plugin["name"],
                 "type": "plugin",
@@ -1343,6 +1952,7 @@ def sweep_project(
             project_path=proj_dir,
             asset_names=names_to_provision,
             library_path=library_path,
+            harness=active_harness,
         )
         provisioned_additions = prov_res.get("provisioned", [])
 
@@ -1427,11 +2037,20 @@ def sweep_project(
         p["name"].lower().replace("_", "-"): p for p in catalog.get("plugins", [])
     }
 
+    detected_tech_tags: Set[str] = set()
+    for tech in scan.get("technologies", []):
+        detected_tech_tags.update(tech.get("tags", []))
+
     for s in installed_skills:
         s_norm = s["name"].lower().replace("_", "-")
         cat_entry = catalog_skills_by_name.get(s_norm) or catalog_skills_by_name.get(s["name"].lower())
-        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
-        pkg = ((cat_entry.get("package") or "").lower().replace("_", "-")) if cat_entry else s_norm
+
+        # Unmanaged project skills protection: never prune custom local skills not in the central catalog
+        if not cat_entry:
+            continue
+
+        tier = cat_entry.get("tier", "stack")
+        pkg = ((cat_entry.get("package") or "").lower().replace("_", "-"))
 
         # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
         has_core = os.path.exists(os.path.join(s["path"], CORE_MARKER_FILE)) or (tier == "core")
@@ -1444,45 +2063,25 @@ def sweep_project(
         is_orphaned = False
         reason = ""
 
-        is_web_skill = s_norm in ("impeccable", "chrome-extensions") or "web" in s_norm or "chrome" in s_norm or "modern-web" in pkg
-        is_flutter_skill = "flutter" in s_norm or "flutter" in pkg or "dart" in s_norm
-        is_firebase_skill = "firebase" in s_norm or "firebase" in pkg
-        is_android_skill = "android" in s_norm or "android" in pkg or "gradle" in s_norm
-        is_python_skill = s_norm in ("uv",) or "python" in s_norm or "science" in pkg
-        is_docker_skill = "cloudrun" in s_norm or "docker" in s_norm
-
         if final_pruning_mode == "aggressive":
             is_matched = (s_norm in rec_skill_names) or (pkg in rec_packages)
             if not is_matched:
                 is_orphaned = True
-                if is_web_skill and not has_web:
-                    reason = "Web/Frontend skill installed, but no web manifests (package.json, HTML) found in workspace"
-                elif is_flutter_skill and not has_flutter:
-                    reason = "Flutter skill installed, but no pubspec.yaml found in workspace"
-                elif is_firebase_skill and not has_firebase:
-                    reason = "Firebase skill installed, but no firebase.json / .firebaserc found in workspace"
-                elif is_android_skill and not has_android:
-                    reason = "Android tool installed, but no Android/Gradle manifests found"
-                elif is_python_skill and not has_python:
-                    reason = "Python skill installed, but no Python manifests found in workspace"
-                elif is_docker_skill and not has_docker:
-                    reason = "Container skill installed, but no Dockerfile / docker-compose.yml found in workspace"
-                else:
-                    reason = f"Skill '{s['name']}' does not match any currently active technology in this workspace"
+                reason = f"Skill '{s['name']}' does not match any currently active technology in this workspace"
         else:
-            # Soft mode: conservative retention, only flag clear negative contradictions
-            if is_flutter_skill and not has_flutter:
+            # Soft mode: conservative retention, only flag clear negative domain contradictions
+            s_tags = set(cat_entry.get("tags", []))
+            is_mobile = bool(s_tags & {"mobile", "flutter", "android", "ios"}) or any(k in s_norm for k in ("flutter", "android", "ios"))
+            is_firebase = "firebase" in s_tags or "firebase" in s_norm
+            has_mobile = bool(detected_tech_tags & {"mobile", "flutter", "android", "ios"})
+            has_fb = "firebase" in detected_tech_tags
+
+            if is_mobile and not has_mobile:
                 is_orphaned = True
-                reason = "Flutter skill installed but no pubspec.yaml found in workspace"
-            elif is_firebase_skill and not has_firebase:
+                reason = f"Mobile skill '{s['name']}' installed, but no mobile manifests found in workspace"
+            elif is_firebase and not has_fb:
                 is_orphaned = True
-                reason = "Firebase skill installed but no firebase.json / .firebaserc found in workspace"
-            elif is_android_skill and not has_android:
-                is_orphaned = True
-                reason = "Android tool installed but no Android/Gradle manifests found"
-            elif is_docker_skill and not has_docker:
-                is_orphaned = True
-                reason = "Container skill installed but no Dockerfile / docker-compose.yml found"
+                reason = f"Firebase skill '{s['name']}' installed, but no firebase manifests found in workspace"
 
         if is_orphaned:
             candidate = {
@@ -1493,7 +2092,10 @@ def sweep_project(
             }
             if final_auto_prune:
                 try:
-                    shutil.rmtree(s["path"])
+                    if os.path.islink(s["path"]):
+                        os.unlink(s["path"])
+                    else:
+                        shutil.rmtree(s["path"])
                     pruned_items.append(candidate)
                 except Exception as e:
                     candidate["error"] = str(e)
@@ -1504,7 +2106,12 @@ def sweep_project(
     for p in installed_plugins:
         p_norm = p["name"].lower().replace("_", "-")
         cat_entry = catalog_plugins_by_name.get(p_norm) or catalog_plugins_by_name.get(p["name"].lower())
-        tier = cat_entry.get("tier", "stack") if cat_entry else "stack"
+
+        # Unmanaged project plugins protection: never prune custom local plugins not in the central catalog
+        if not cat_entry:
+            continue
+
+        tier = cat_entry.get("tier", "stack")
 
         # Core capabilities (.core marker file or tier == "core") are permanent guardrails and never pruned
         has_core = os.path.exists(os.path.join(p["path"], CORE_MARKER_FILE)) or (tier == "core")
@@ -1517,45 +2124,25 @@ def sweep_project(
         is_orphaned = False
         reason = ""
 
-        is_web_plugin = p_norm in ("modern-web-guidance-plugin", "chrome-devtools-plugin") or "web" in p_norm or "chrome" in p_norm
-        is_flutter_plugin = "flutter" in p_norm
-        is_firebase_plugin = "firebase" in p_norm
-        is_android_plugin = "android" in p_norm
-        is_docker_plugin = "cloudrun" in p_norm or "docker" in p_norm
-        is_antigravity_plugin = "google-antigravity-sdk" in p_norm
-
         if final_pruning_mode == "aggressive":
             is_matched = p_norm in rec_plugin_names
             if not is_matched:
                 is_orphaned = True
-                if is_web_plugin and not has_web:
-                    reason = "Web/DevTools plugin installed, but no web manifests or frontend assets found in workspace"
-                elif is_flutter_plugin and not has_flutter:
-                    reason = "Flutter plugin installed, but no pubspec.yaml found in workspace"
-                elif is_firebase_plugin and not has_firebase:
-                    reason = "Firebase plugin installed, but no firebase.json / .firebaserc found in workspace"
-                elif is_android_plugin and not has_android:
-                    reason = "Android CLI plugin installed, but no Android/Gradle manifests found"
-                elif is_docker_plugin and not has_docker:
-                    reason = "Cloud Run plugin installed, but no Dockerfile / docker-compose.yml found in workspace"
-                elif is_antigravity_plugin and not (has_python and any(kw in safe_read(os.path.join(proj_dir, "pyproject.toml")).lower() for kw in ["antigravity", "gemini"])):
-                    reason = "Antigravity SDK plugin installed, but no Antigravity dependencies or agents found"
-                else:
-                    reason = f"Plugin '{p['name']}' does not match any currently active technology in this workspace"
+                reason = f"Plugin '{p['name']}' does not match any currently active technology in this workspace"
         else:
-            # Soft mode: conservative retention, only flag clear negative contradictions
-            if is_flutter_plugin and not has_flutter:
+            # Soft mode: conservative retention, only flag clear negative domain contradictions
+            p_tags = set(cat_entry.get("tags", []))
+            is_mobile = bool(p_tags & {"mobile", "flutter", "android", "ios"}) or any(k in p_norm for k in ("flutter", "android", "ios"))
+            is_firebase = "firebase" in p_tags or "firebase" in p_norm
+            has_mobile = bool(detected_tech_tags & {"mobile", "flutter", "android", "ios"})
+            has_fb = "firebase" in detected_tech_tags
+
+            if is_mobile and not has_mobile:
                 is_orphaned = True
-                reason = "Flutter plugin installed but no pubspec.yaml found in workspace"
-            elif is_firebase_plugin and not has_firebase:
+                reason = f"Mobile plugin '{p['name']}' installed, but no mobile manifests found in workspace"
+            elif is_firebase and not has_fb:
                 is_orphaned = True
-                reason = "Firebase plugin installed but no firebase.json / .firebaserc found in workspace"
-            elif is_android_plugin and not has_android:
-                is_orphaned = True
-                reason = "Android CLI plugin installed but no Android/Gradle manifests found"
-            elif is_docker_plugin and not has_docker:
-                is_orphaned = True
-                reason = "Cloud Run plugin installed but no Dockerfile / docker-compose.yml found"
+                reason = f"Firebase plugin '{p['name']}' installed, but no firebase manifests found in workspace"
 
         if is_orphaned:
             candidate = {
@@ -1566,7 +2153,10 @@ def sweep_project(
             }
             if final_auto_prune:
                 try:
-                    shutil.rmtree(p["path"])
+                    if os.path.islink(p["path"]):
+                        os.unlink(p["path"])
+                    else:
+                        shutil.rmtree(p["path"])
                     pruned_items.append(candidate)
                 except Exception as e:
                     candidate["error"] = str(e)
@@ -1574,14 +2164,48 @@ def sweep_project(
             elif final_suggest_pruning:
                 pruning_candidates.append(candidate)
 
+    for hd in husk_dirs:
+        h_name = os.path.basename(hd)
+        candidate = {
+            "name": h_name,
+            "type": "husk",
+            "path": hd,
+            "reason": f"Directory '{h_name}' in skills folder contains no SKILL.md and cannot be discovered by agent harness",
+        }
+        if final_auto_prune and not check_only:
+            try:
+                if os.path.islink(hd):
+                    os.unlink(hd)
+                else:
+                    shutil.rmtree(hd)
+                pruned_items.append(candidate)
+            except Exception as e:
+                candidate["error"] = str(e)
+                pruning_candidates.append(candidate)
+        elif final_suggest_pruning:
+            pruning_candidates.append(candidate)
+
+    pruned_paths = {item["path"] for item in pruned_items if "path" in item}
+    pruned_names = {item["name"] for item in pruned_items if "name" in item}
+    remaining_skills = [s for s in installed_skills if s["path"] not in pruned_paths and s["name"] not in pruned_names]
+    remaining_plugins = [p for p in installed_plugins if p["path"] not in pruned_paths and p["name"] not in pruned_names]
+
+    if check_only:
+        synced_docs = {}
+    else:
+        synced_docs = sync_project_docs(proj_dir, active_harness, remaining_skills, remaining_plugins)
+
     return {
         "project_path": proj_dir,
+        "harness": active_harness,
+        "check_only": check_only,
+        "synced_docs": synced_docs,
         "library_path": catalog.get("library_path"),
         "scan_status": scan.get("status"),
         "manifests_found": scan.get("manifests_found", []),
         "technologies": scan.get("technologies", []),
-        "installed_plugins": installed_plugins,
-        "installed_skills": installed_skills,
+        "installed_plugins": remaining_plugins,
+        "installed_skills": remaining_skills,
         "additions_recommended": additions,
         "provisioned_additions": provisioned_additions,
         "auto_add_enabled": final_auto_add,
@@ -1625,6 +2249,10 @@ def mark_core(
             os.path.join(proj_dir, ".agents", "skills", norm),
             os.path.join(proj_dir, ".agents", "plugins", name),
             os.path.join(proj_dir, ".agents", "plugins", norm),
+            os.path.join(proj_dir, ".claude", "skills", name),
+            os.path.join(proj_dir, ".claude", "skills", norm),
+            os.path.join(proj_dir, ".claude", "plugins", name),
+            os.path.join(proj_dir, ".claude", "plugins", norm),
         ]
         for t in ws_targets:
             if os.path.isdir(t):
@@ -1670,6 +2298,10 @@ def mark_core(
                             pass
 
     success = len(marked_paths) > 0
+    if success and proj_dir and os.path.exists(proj_dir):
+        h = detect_harness(proj_dir)
+        sync_project_docs(proj_dir, h)
+
     return {
         "status": "marked" if success else "not_found",
         "name": name,
@@ -1707,6 +2339,10 @@ def unmark_core(
             os.path.join(proj_dir, ".agents", "skills", norm),
             os.path.join(proj_dir, ".agents", "plugins", name),
             os.path.join(proj_dir, ".agents", "plugins", norm),
+            os.path.join(proj_dir, ".claude", "skills", name),
+            os.path.join(proj_dir, ".claude", "skills", norm),
+            os.path.join(proj_dir, ".claude", "plugins", name),
+            os.path.join(proj_dir, ".claude", "plugins", norm),
         ]
         for t in ws_targets:
             if os.path.isdir(t):
@@ -1752,6 +2388,10 @@ def unmark_core(
                                 pass
 
     success = len(unmarked_paths) > 0
+    if success and proj_dir and os.path.exists(proj_dir):
+        h = detect_harness(proj_dir)
+        sync_project_docs(proj_dir, h)
+
     return {
         "status": "unmarked" if success else "not_found",
         "name": name,
@@ -1808,39 +2448,47 @@ def list_core(
 
     # From Workspace
     if proj_dir and os.path.exists(proj_dir):
-        ws_skills_dir = os.path.join(proj_dir, ".agents", "skills")
-        if os.path.isdir(ws_skills_dir):
-            for s_name in os.listdir(ws_skills_dir):
-                s_dir = os.path.join(ws_skills_dir, s_name)
-                if os.path.isdir(s_dir) and os.path.exists(os.path.join(s_dir, CORE_MARKER_FILE)):
-                    if s_name in core_items:
-                        core_items[s_name]["in_workspace"] = True
-                    else:
-                        core_items[s_name] = {
-                            "name": s_name,
-                            "type": "skill",
-                            "package": "workspace-local",
-                            "in_library": False,
-                            "in_workspace": True,
-                            "description": "Workspace-local core capability",
-                        }
+        ws_skills_dirs = [
+            os.path.join(proj_dir, ".agents", "skills"),
+            os.path.join(proj_dir, ".claude", "skills"),
+        ]
+        for ws_skills_dir in ws_skills_dirs:
+            if os.path.isdir(ws_skills_dir):
+                for s_name in os.listdir(ws_skills_dir):
+                    s_dir = os.path.join(ws_skills_dir, s_name)
+                    if os.path.isdir(s_dir) and os.path.exists(os.path.join(s_dir, CORE_MARKER_FILE)):
+                        if s_name in core_items:
+                            core_items[s_name]["in_workspace"] = True
+                        else:
+                            core_items[s_name] = {
+                                "name": s_name,
+                                "type": "skill",
+                                "package": "workspace-local",
+                                "in_library": False,
+                                "in_workspace": True,
+                                "description": "Workspace-local core capability",
+                            }
 
-        ws_plugins_dir = os.path.join(proj_dir, ".agents", "plugins")
-        if os.path.isdir(ws_plugins_dir):
-            for p_name in os.listdir(ws_plugins_dir):
-                p_dir = os.path.join(ws_plugins_dir, p_name)
-                if os.path.isdir(p_dir) and os.path.exists(os.path.join(p_dir, CORE_MARKER_FILE)):
-                    if p_name in core_items:
-                        core_items[p_name]["in_workspace"] = True
-                    else:
-                        core_items[p_name] = {
-                            "name": p_name,
-                            "type": "plugin",
-                            "package": "workspace-local",
-                            "in_library": False,
-                            "in_workspace": True,
-                            "description": "Workspace-local core capability",
-                        }
+        ws_plugins_dirs = [
+            os.path.join(proj_dir, ".agents", "plugins"),
+            os.path.join(proj_dir, ".claude", "plugins"),
+        ]
+        for ws_plugins_dir in ws_plugins_dirs:
+            if os.path.isdir(ws_plugins_dir):
+                for p_name in os.listdir(ws_plugins_dir):
+                    p_dir = os.path.join(ws_plugins_dir, p_name)
+                    if os.path.isdir(p_dir) and os.path.exists(os.path.join(p_dir, CORE_MARKER_FILE)):
+                        if p_name in core_items:
+                            core_items[p_name]["in_workspace"] = True
+                        else:
+                            core_items[p_name] = {
+                                "name": p_name,
+                                "type": "plugin",
+                                "package": "workspace-local",
+                                "in_library": False,
+                                "in_workspace": True,
+                                "description": "Workspace-local core capability",
+                            }
 
     items_list = sorted(core_items.values(), key=lambda x: (x["type"], x["name"]))
     return {
@@ -1997,15 +2645,20 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     lines.append(f"  Pruning Strategy: {p_mode} ({strat_desc})")
     lines.append("=" * 80)
 
+    harness_label = swp.get("harness", "agy")
+    tgt_desc = ".claude/skills/" if harness_label == "claude" else ".agents/"
+
     i_plugins = swp.get("installed_plugins", [])
     i_skills = swp.get("installed_skills", [])
     lines.append(f"\n[Active Workspace Inventory] ({len(i_plugins)} plugins, {len(i_skills)} skills)")
     for p in i_plugins:
-        lines.append(f"  * [PLUGIN] {p['name']:<30} in .agents/plugins/")
+        p_loc = ".claude/plugins/" if harness_label == "claude" else ".agents/plugins/"
+        lines.append(f"  * [PLUGIN] {p['name']:<30} in {p_loc}")
     for s in i_skills:
-        lines.append(f"  * [SKILL]  {s['name']:<30} in .agents/skills/")
+        s_loc = ".claude/skills/" if harness_label == "claude" else ".agents/skills/"
+        lines.append(f"  * [SKILL]  {s['name']:<30} in {s_loc}")
     if not i_plugins and not i_skills:
-        lines.append("  (No skills or plugins currently provisioned in .agents/)")
+        lines.append(f"  (No skills or plugins currently provisioned in {tgt_desc})")
 
     prov_additions = swp.get("provisioned_additions", [])
     additions = swp.get("additions_recommended", [])
@@ -2030,7 +2683,7 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     if pruned:
         lines.append(f"\n[Auto-Pruned Unneeded Capabilities ({len(pruned)})]")
         for pr in pruned:
-            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30} (removed from .agents/)")
+            lines.append(f"  * - [{pr['type'].upper()}] {pr['name']:<30} (removed from {tgt_desc})")
             lines.append(f"      Note: {pr['reason']}")
 
     candidates = swp.get("pruning_candidates", [])
@@ -2045,7 +2698,7 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
 
     lines.append("\n" + "=" * 80)
     if prov_additions:
-        lines.append(f"Status: Auto-equipped {len(prov_additions)} matching capabilities into .agents/.")
+        lines.append(f"Status: Auto-equipped {len(prov_additions)} matching capabilities into {tgt_desc}.")
     elif additions:
         lines.append("Status: New capabilities detected. Run /quartermaster sweep to equip.")
     else:
@@ -2250,6 +2903,13 @@ def main() -> int:
         help="In sweep mode, do not automatically equip newly recommended capabilities (recommendation only).",
     )
     parser.add_argument(
+        "--check-only",
+        "--dry-run",
+        dest="check_only",
+        action="store_true",
+        help="In sweep mode, perform a strictly read-only check: do not auto-add, do not auto-prune, and do not rewrite CLAUDE.md/AGENTS.md.",
+    )
+    parser.add_argument(
         "--import",
         dest="import_url",
         metavar="GIT_URL",
@@ -2274,6 +2934,17 @@ def main() -> int:
         "--core",
         action="store_true",
         help="In import mode, designate the imported capability as Core (.core marker attached).",
+    )
+    parser.add_argument(
+        "--harness",
+        choices=["agy", "claude", "codex", "universal", "auto"],
+        default="auto",
+        help="Agent harness target: agy, claude, codex, universal, or auto (default: auto).",
+    )
+    parser.add_argument(
+        "--sync-docs",
+        action="store_true",
+        help="Synchronize project agent context documentation (CLAUDE.md / AGENTS.md).",
     )
     parser.add_argument(
         "--config",
@@ -2317,7 +2988,39 @@ def main() -> int:
         help="Override skills-library directory path for this execution.",
     )
 
-    args = parser.parse_args()
+    # Defensive filter: clean extraneous 'sweep' positional arguments
+    raw_args = sys.argv[1:]
+    filtered_args = []
+    seen_sweep = False
+    for a in raw_args:
+        if a == "--sweep":
+            seen_sweep = True
+            filtered_args.append(a)
+        elif a == "sweep" and (seen_sweep or (filtered_args and filtered_args[-1] == "--sweep")):
+            # Redundant literal 'sweep' argument
+            continue
+        elif a == "sweep" and not filtered_args:
+            # Invoked as `quartermaster.py sweep` -> convert to `--sweep .`
+            filtered_args.extend(["--sweep", "."])
+            seen_sweep = True
+        else:
+            filtered_args.append(a)
+
+    args = parser.parse_args(filtered_args)
+
+    # Context Documentation Sync
+    if args.sync_docs:
+        proj = args.project if args.project else (find_project_root() or os.getcwd())
+        active_h = detect_harness(proj, args.harness)
+        docs = sync_project_docs(proj, active_h)
+        if args.json:
+            print(json.dumps(docs, indent=2))
+        else:
+            print("Synchronized project documentation:")
+            for h, p in docs.items():
+                if p:
+                    print(f"  * [{h.upper()}] {p}")
+        return 0
 
     # Import Git Repo into Central Library & Active Project
     if args.import_url:
@@ -2331,6 +3034,7 @@ def main() -> int:
             project_path=proj_arg,
             force=args.force,
             is_core=args.core,
+            harness=args.harness,
         )
         if args.json:
             print(json.dumps(res, indent=2))
@@ -2349,7 +3053,11 @@ def main() -> int:
 
     if args.config_set:
         key, val = args.config_set
-        cfg = set_config_value(key, val)
+        try:
+            cfg = set_config_value(key, val, harness=args.harness)
+        except ValueError as e:
+            sys.stderr.write(f"Error: {e}\n")
+            return 1
         if args.json:
             print(json.dumps(cfg, indent=2))
         else:
@@ -2420,9 +3128,15 @@ def main() -> int:
             return 0
 
         if args.sweep is not None:
-            suggest_prune = False if args.no_prune else None
-            auto_p = True if args.auto_prune else None
-            auto_a = False if args.no_auto_add else None
+            if args.check_only:
+                suggest_prune = False if args.no_prune else None
+                auto_p = False
+                auto_a = False
+            else:
+                suggest_prune = False if args.no_prune else None
+                auto_p = False if args.no_prune else (True if args.auto_prune else None)
+                auto_a = False if args.no_auto_add else None
+
             p_mode = None
             if args.aggressive:
                 p_mode = "aggressive"
@@ -2436,6 +3150,8 @@ def main() -> int:
                 suggest_pruning=suggest_prune,
                 auto_prune=auto_p,
                 pruning_mode=p_mode,
+                harness=args.harness,
+                check_only=args.check_only,
             )
             if args.json:
                 print(json.dumps(swp_res, indent=2))
@@ -2466,6 +3182,7 @@ def main() -> int:
                 asset_names=items,
                 library_path=args.library,
                 force_type=force_type,
+                harness=args.harness,
             )
             if args.json:
                 print(json.dumps(prov_res, indent=2))

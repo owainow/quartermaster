@@ -1,0 +1,7 @@
+name: quartermaster
+version: 1.2.0
+description: "Project-scoped capability armory and sweep engine for OpenAI Codex."
+tools:
+  - type: bash
+    description: "Run Quartermaster armory, scan, sweep, and import commands"
+    command: "python3 ${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"

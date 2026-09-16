@@ -241,11 +241,9 @@ Settings keys:
 ## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
 
 When the user runs `/quartermaster schedule`:
-- **Google Antigravity (AGY)**: Call the native `schedule` tool:
-  - `CronExpression`: `"0 9 * * *"`
-  - `IsDaemon`: `true`
-  - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
-  - Confirm to the user:
-    *"Automated daily sweep is active! Quartermaster will audit this project every morning at 9:00 AM and notify you only if additions or cleanup recommendations are detected."*
-- **Anthropic Claude Code**: If running in plugin mode (`claude --plugin-dir`), background daily sweep checks run automatically on `SessionStart`. Alternatively, set up an idempotent crontab entry running `quartermaster.py --sweep $(pwd) --harness claude`.
-- **OpenAI Codex**: Configure a cron schedule or record routine audit instructions in `AGENTS.md`.
+1. Actively call the `schedule` tool:
+   - `CronExpression`: `"0 9 * * *"`
+   - `IsDaemon`: `true`
+   - `Prompt`: `"Run /quartermaster sweep and notify only if additions or pruning recommendations are detected."`
+2. Confirm to the user:
+   *"Automated daily sweep is active! Quartermaster will audit this project every morning at 9:00 AM and notify you only if additions or cleanup recommendations are detected."*

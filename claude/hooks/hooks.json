@@ -1,0 +1,18 @@
+{
+  "description": "Quartermaster session lifecycle automation",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_sweep.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
+

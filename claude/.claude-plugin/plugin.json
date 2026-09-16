@@ -1,0 +1,13 @@
+{
+  "name": "quartermaster",
+  "version": "1.2.0",
+  "description": "Smart, project-scoped capability provisioner, skills armory, and automated sweep engine.",
+  "author": {
+    "name": "Quartermaster"
+  },
+  "homepage": "https://github.com/owainow/quartermaster",
+  "repository": "https://github.com/owainow/quartermaster",
+  "license": "MIT",
+  "keywords": ["skills", "plugins", "provisioning", "armory", "sweep", "onboarding"]
+}
+
