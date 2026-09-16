@@ -13,7 +13,7 @@ Quartermaster manages repository-level capabilities in `.agents/skills/` and `.a
 Codex agents execute the Quartermaster Python engine via:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
 ```
 
 ---
@@ -27,7 +27,7 @@ Select matching capabilities from the central armory and provision them into `.a
 Execute stack scan:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --scan . --harness codex --json
 ```
 
@@ -39,7 +39,6 @@ Provision approved capabilities:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --provision . --skills <approved_names> --harness codex
 ```
 
@@ -48,7 +47,6 @@ Audit active capabilities against codebase manifests:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --sweep . --harness codex
 ```
 
@@ -65,7 +63,6 @@ Import an external repository or extract a specific skill into the armory and ac
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
 [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --import <git_url> --project . --harness codex
 ```
 Append `--core` to mark the capability as a protected permanent guardrail.
@@ -77,21 +74,18 @@ Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/
   ```bash
   QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-list --project .
   ```
 - Add Core protection:
   ```bash
   QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-add <name> --project .
   ```
 - Remove Core protection:
   ```bash
   QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
-  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
   python3 "$QM_SCRIPT" --core-rm <name> --project .
   ```
 
@@ -99,7 +93,7 @@ Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/
 List all available skills and plugins in the central armory:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --catalog
 ```
 

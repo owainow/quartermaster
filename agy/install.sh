@@ -8,10 +8,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_DIR="${HOME}/.gemini/config/skills/quartermaster"
 
 FORCE=0
+DEV_MODE=0
 for arg in "$@"; do
   case "$arg" in
     -y|--yes|-f|--force)
       FORCE=1
+      ;;
+    --dev|--link)
+      DEV_MODE=1
       ;;
   esac
 done
@@ -43,11 +47,24 @@ if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
   rm -rf "${TARGET_DIR}"
 fi
 
-# Create symbolic link from repo root to global skills directory
-ln -snf "${REPO_ROOT}" "${TARGET_DIR}"
+if [ "$DEV_MODE" -eq 1 ]; then
+  # Developer mode: link directly to active repository
+  ln -snf "${REPO_ROOT}" "${TARGET_DIR}"
+  echo ""
+  echo "Quartermaster skill linked in developer mode to: ${TARGET_DIR}"
+  echo "Repository changes will take effect live without reinstalling."
+else
+  # Distribution default: self-contained, relocation-proof physical copy
+  mkdir -p "${TARGET_DIR}"
+  cp -f "${REPO_ROOT}/SKILL.md" "${TARGET_DIR}/"
+  [ -f "${SCRIPT_DIR}/SKILL.md" ] && cp -f "${SCRIPT_DIR}/SKILL.md" "${TARGET_DIR}/"
+  rm -rf "${TARGET_DIR}/scripts"
+  cp -R "${REPO_ROOT}/scripts" "${TARGET_DIR}/scripts"
+  echo ""
+  echo "Quartermaster skill successfully installed (self-contained copy) to: ${TARGET_DIR}"
+  echo "The installation is fully decoupled from the source repository."
+fi
 
-echo ""
-echo "Quartermaster successfully linked to: ${TARGET_DIR}"
 echo ""
 echo "Antigravity automatically discovers skills in ~/.gemini/config/skills/."
 echo "You can now open any project in Antigravity and run:"

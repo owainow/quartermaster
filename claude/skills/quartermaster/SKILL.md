@@ -48,9 +48,9 @@ Parse `$ARGUMENTS` to determine the requested action:
 ### Engine Script Resolution:
 Always resolve the Quartermaster script via:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 ```
 </instructions>
 
@@ -62,9 +62,9 @@ QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
 ### Stage 1: Workspace Reconnaissance
 1. Scan project manifests:
    ```bash
-   QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+   QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+   [ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
    python3 "$QM_SCRIPT" --scan . --harness claude --json
    ```
 2. Determine if the workspace is an active project with manifests, or a brand-new repository (`status == "unscoped_new_project"`).
@@ -115,9 +115,9 @@ Confirm installed capabilities and inform the user that daily sweeps will keep t
 <workflow>
 Execute a capability audit:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --sweep . --harness claude
 ```
 
@@ -141,9 +141,9 @@ Sweep Actions:
 <workflow>
 When the user pastes a repository URL or a direct link to a specific skill:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --import <git_url> --project . --harness claude
 ```
 
@@ -164,9 +164,9 @@ Deterministic `.core` marker files inside capability folders (`.claude/skills/<n
 
 ### 1. List Core Capabilities:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --core-list --project .
 ```
 
@@ -188,9 +188,9 @@ python3 "$QM_SCRIPT" --core-rm <name> --project .
 <workflow>
 Display all available armory capabilities:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --catalog
 ```
 </workflow>
@@ -202,9 +202,9 @@ python3 "$QM_SCRIPT" --catalog
 <workflow>
 Inspect or update Quartermaster settings:
 ```bash
-QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
 python3 "$QM_SCRIPT" --config --json
 ```
 To inspect a single key:
@@ -227,7 +227,7 @@ In Claude Code, background daily sweep checks run automatically on `SessionStart
 To configure an automated daily morning sweep without relying on session starts, install or verify an idempotent crontab entry (at 9:00 AM daily, running a safe sweep using configured defaults):
 ```bash
 QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
-[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
 CRON_ENTRY="0 9 * * * python3 $QM_SCRIPT --sweep $(pwd) --harness claude >> $(pwd)/.claude/quartermaster-sweep.log 2>&1"
 (crontab -l 2>/dev/null | grep -v -F "quartermaster.py --sweep $(pwd)"; echo "$CRON_ENTRY") | crontab -
 ```
