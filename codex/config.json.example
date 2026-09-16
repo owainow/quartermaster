@@ -1,0 +1,7 @@
+{
+  "skills-library": "~/.agents/skills-library",
+  "auto-add": true,
+  "suggest-pruning": true,
+  "auto-prune": false,
+  "pruning-mode": "aggressive"
+}

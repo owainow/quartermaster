@@ -84,20 +84,33 @@ CONVENTIONAL_CORE_NAMES = {
 # Multi-Harness Detection & Target Path Resolution
 # ==============================================================================
 
+def safe_write_file(file_path: str, content: str) -> None:
+    """Atomically write content to file_path using a temporary file."""
+    target_dir = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(target_dir, exist_ok=True)
+    tmp_path = f"{file_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(tmp_path, file_path)
+
+
 def detect_harness(project_path: Optional[str] = None, explicit_harness: Optional[str] = None) -> str:
     """
     Detects the active agent harness.
     Precedence:
     1. Explicit CLI argument (--harness) if not 'auto'
     2. QUARTERMASTER_HARNESS environment variable
-    3. Filesystem markers in target project or current directory:
+    3. Active harness environment variables (CLAUDE_PROJECT_DIR, CODEX_HOME, etc.)
+    4. Project marker files and directories:
        - .claude/ directory or CLAUDE.md -> 'claude'
        - .codex/ directory or AGENTS.md -> 'codex'
-       - .agents/ directory -> 'agy'
-    4. Host user environment:
-       - ~/.claude exists and ~/.gemini does not -> 'claude'
-       - ~/.codex exists and ~/.gemini does not -> 'codex'
-    5. Default fallback: 'agy'
+       - .gemini/ directory -> 'agy'
+       - .agents/ directory -> 'codex' (if ~/.codex) or 'agy'
+    5. Host user environment:
+       - ~/.claude exists and neither ~/.gemini nor ~/.codex -> 'claude'
+       - ~/.codex exists and not ~/.gemini -> 'codex'
+       - ~/.gemini exists -> 'agy'
+    6. Default fallback: 'agy'
     """
     if explicit_harness and explicit_harness.lower() != "auto":
         h = explicit_harness.lower().strip()
@@ -108,21 +121,30 @@ def detect_harness(project_path: Optional[str] = None, explicit_harness: Optiona
     if env_h in SUPPORTED_HARNESSES:
         return env_h
 
+    if os.environ.get("CLAUDE_PROJECT_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "claude"
+    if os.environ.get("CODEX_HOME") or os.environ.get("CODEX_CLI"):
+        return "codex"
+
     probe_dir = os.path.abspath(os.path.expanduser(project_path)) if project_path else os.getcwd()
 
     if os.path.exists(os.path.join(probe_dir, ".claude")) or os.path.exists(os.path.join(probe_dir, "CLAUDE.md")):
         return "claude"
     if os.path.exists(os.path.join(probe_dir, ".codex")) or os.path.exists(os.path.join(probe_dir, "AGENTS.md")):
         return "codex"
+    if os.path.exists(os.path.join(probe_dir, ".gemini")):
+        return "agy"
     if os.path.exists(os.path.join(probe_dir, ".agents")):
+        if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+            return "codex"
         return "agy"
 
+    if os.path.exists(os.path.expanduser("~/.claude")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+        return "claude"
+    if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+        return "codex"
     if os.path.exists(os.path.expanduser("~/.gemini")):
         return "agy"
-    if os.path.exists(os.path.expanduser("~/.claude")):
-        return "claude"
-    if os.path.exists(os.path.expanduser("~/.codex")):
-        return "codex"
 
     return "agy"
 
@@ -130,15 +152,13 @@ def detect_harness(project_path: Optional[str] = None, explicit_harness: Optiona
 def get_harness_target_paths(project_path: str, harness: str) -> Tuple[str, str]:
     """
     Returns (skills_dir, plugins_dir) for the given harness.
-    - claude: <project>/.claude/skills and <project>/.claude/plugins
+    - claude: <project>/.claude/skills and <project>/.claude/skills (Claude Code discovers .claude/skills only)
     - agy / codex / universal: <project>/.agents/skills and <project>/.agents/plugins
     """
     proj = os.path.abspath(os.path.expanduser(project_path))
     if harness == "claude":
-        return (
-            os.path.join(proj, ".claude", "skills"),
-            os.path.join(proj, ".claude", "plugins"),
-        )
+        claude_skills = os.path.join(proj, ".claude", "skills")
+        return (claude_skills, claude_skills)
     return (
         os.path.join(proj, ".agents", "skills"),
         os.path.join(proj, ".agents", "plugins"),
@@ -162,10 +182,11 @@ def sync_claude_md(
     content = ""
     if os.path.exists(claude_md_path):
         try:
-            with open(claude_md_path, "r", encoding="utf-8") as f:
+            with open(claude_md_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
-        except Exception:
-            content = ""
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read {claude_md_path}: {e}\n")
+            return None
 
     start_marker = "<!-- QUARTERMASTER_START -->"
     end_marker = "<!-- QUARTERMASTER_END -->"
@@ -183,16 +204,18 @@ def sync_claude_md(
     for s in sorted(active_skills, key=lambda x: x["name"]):
         s_name = s["name"]
         s_path = s.get("path", f".claude/skills/{s_name}")
-        rel_path = os.path.relpath(s_path, project_path) if os.path.isabs(s_path) else s_path
-        is_core = os.path.exists(os.path.join(s_path, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
+        rel_path = os.path.relpath(s_path_full, project_path)
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
 
     for p in sorted(active_plugins, key=lambda x: x["name"]):
         p_name = p["name"]
-        p_path = p.get("path", f".claude/plugins/{p_name}")
-        rel_path = os.path.relpath(p_path, project_path) if os.path.isabs(p_path) else p_path
-        is_core = os.path.exists(os.path.join(p_path, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        p_path = p.get("path", f".claude/skills/{p_name}")
+        p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
+        rel_path = os.path.relpath(p_path_full, project_path)
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
 
@@ -204,6 +227,9 @@ def sync_claude_md(
     block_lines.append(end_marker)
     new_block = "\n".join(block_lines)
 
+    if start_marker in content and end_marker not in content:
+        content = content.replace(start_marker, f"{start_marker}\n{end_marker}\n")
+
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
         updated = pattern.sub(new_block, content)
@@ -214,8 +240,7 @@ def sync_claude_md(
             updated = "# Project Guidelines\n\n" + new_block + "\n"
 
     try:
-        with open(claude_md_path, "w", encoding="utf-8") as f:
-            f.write(updated)
+        safe_write_file(claude_md_path, updated)
         return claude_md_path
     except Exception:
         return None
@@ -234,10 +259,11 @@ def sync_agents_md(
     content = ""
     if os.path.exists(agents_md_path):
         try:
-            with open(agents_md_path, "r", encoding="utf-8") as f:
+            with open(agents_md_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
-        except Exception:
-            content = ""
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read {agents_md_path}: {e}\n")
+            return None
 
     start_marker = "<!-- QUARTERMASTER_START -->"
     end_marker = "<!-- QUARTERMASTER_END -->"
@@ -255,16 +281,18 @@ def sync_agents_md(
     for s in sorted(active_skills, key=lambda x: x["name"]):
         s_name = s["name"]
         s_path = s.get("path", f".agents/skills/{s_name}")
-        rel_path = os.path.relpath(s_path, project_path) if os.path.isabs(s_path) else s_path
-        is_core = os.path.exists(os.path.join(s_path, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
+        rel_path = os.path.relpath(s_path_full, project_path)
+        is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE)) or s_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
 
     for p in sorted(active_plugins, key=lambda x: x["name"]):
         p_name = p["name"]
         p_path = p.get("path", f".agents/plugins/{p_name}")
-        rel_path = os.path.relpath(p_path, project_path) if os.path.isabs(p_path) else p_path
-        is_core = os.path.exists(os.path.join(p_path, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
+        p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
+        rel_path = os.path.relpath(p_path_full, project_path)
+        is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE)) or p_name.lower().replace("_", "-") in CONVENTIONAL_CORE_NAMES
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
 
@@ -276,6 +304,9 @@ def sync_agents_md(
     block_lines.append(end_marker)
     new_block = "\n".join(block_lines)
 
+    if start_marker in content and end_marker not in content:
+        content = content.replace(start_marker, f"{start_marker}\n{end_marker}\n")
+
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
         updated = pattern.sub(new_block, content)
@@ -286,8 +317,7 @@ def sync_agents_md(
             updated = "# Agent Guidelines\n\n" + new_block + "\n"
 
     try:
-        with open(agents_md_path, "w", encoding="utf-8") as f:
-            f.write(updated)
+        safe_write_file(agents_md_path, updated)
         return agents_md_path
     except Exception:
         return None
@@ -337,18 +367,25 @@ def sync_project_docs(
 # Configuration & Settings Management
 # ==============================================================================
 
-def get_active_config_file() -> str:
-    """Returns the primary config file path based on existing files."""
+def get_active_config_file(harness: Optional[str] = None) -> str:
+    """Returns the primary config file path based on active harness or existing files."""
+    if harness == "claude":
+        return CLAUDE_CONFIG_FILE
+    elif harness == "codex":
+        return CODEX_CONFIG_FILE
+    elif harness == "agy":
+        return GLOBAL_CONFIG_FILE
+
     for p in CONFIG_SEARCH_PATHS:
         if os.path.exists(p):
             return p
     return GLOBAL_CONFIG_FILE
 
 
-def load_config() -> Dict[str, Any]:
+def load_config(harness: Optional[str] = None) -> Dict[str, Any]:
     """Loads Quartermaster settings from disk or returns defaults."""
     cfg = dict(DEFAULT_CONFIG)
-    cfg_file = get_active_config_file()
+    cfg_file = get_active_config_file(harness)
     if os.path.exists(cfg_file):
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
@@ -360,24 +397,23 @@ def load_config() -> Dict[str, Any]:
     return cfg
 
 
-def save_config(cfg: Dict[str, Any]) -> str:
-    """Saves Quartermaster settings to disk."""
-    cfg_file = get_active_config_file()
-    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
-    with open(cfg_file, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
+def save_config(cfg: Dict[str, Any], harness: Optional[str] = None) -> str:
+    """Saves Quartermaster settings to disk atomically."""
+    cfg_file = get_active_config_file(harness)
+    content = json.dumps(cfg, indent=2) + "\n"
+    safe_write_file(cfg_file, content)
     return cfg_file
 
 
-def get_config_value(key: str) -> Optional[Any]:
+def get_config_value(key: str, harness: Optional[str] = None) -> Optional[Any]:
     """Retrieves a specific configuration value."""
-    cfg = load_config()
+    cfg = load_config(harness)
     return cfg.get(key)
 
 
-def set_config_value(key: str, value: Any) -> Dict[str, Any]:
+def set_config_value(key: str, value: Any, harness: Optional[str] = None) -> Dict[str, Any]:
     """Sets a specific configuration value and persists it."""
-    cfg = load_config()
+    cfg = load_config(harness)
     # Normalize booleans if passed as string
     if isinstance(value, str):
         if value.lower() in ("true", "1", "yes", "on"):
@@ -391,7 +427,7 @@ def set_config_value(key: str, value: Any) -> Dict[str, Any]:
     if key == "prune-mode":
         key = "pruning-mode"
     cfg[key] = value
-    save_config(cfg)
+    save_config(cfg, harness)
     return cfg
 
 
@@ -564,6 +600,13 @@ def import_library_asset(
     lib_dir = resolve_library_path(library_path)
     os.makedirs(lib_dir, exist_ok=True)
 
+    if not git_url or git_url.strip().startswith("-"):
+        return {
+            "status": "error",
+            "error": f"Invalid git repository URL or flag: {git_url}",
+            "git_url": git_url,
+        }
+
     cleaned_url = git_url.strip().rstrip("/")
     clone_url = cleaned_url
     target_subpath: Optional[str] = None
@@ -610,7 +653,7 @@ def import_library_asset(
     # CASE 1: Targeted skill extracted from repository
     if target_skill_name:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            cmd = ["git", "clone", "--depth", "1", clone_url, tmp_dir]
+            cmd = ["git", "clone", "--depth", "1", "--", clone_url, tmp_dir]
             try:
                 subprocess.run(cmd, capture_output=True, text=True, check=True)
             except subprocess.CalledProcessError as e:
@@ -637,13 +680,11 @@ def import_library_asset(
 
             if not candidate_dirs:
                 all_s = glob.glob(os.path.join(tmp_dir, "**", "SKILL.md"), recursive=True)
-                if all_s:
-                    candidate_dirs.append(os.path.dirname(all_s[0]))
-
-            if not candidate_dirs:
+                available = [os.path.basename(os.path.dirname(p)) for p in all_s]
+                avail_str = f" Available skills: {', '.join(available[:10])}" if available else ""
                 return {
                     "status": "error",
-                    "error": f"No skill definition (SKILL.md) found for '{target_skill_name}' in {clone_url}",
+                    "error": f"No skill definition (SKILL.md) found for '{target_skill_name}' in {clone_url}.{avail_str}",
                     "git_url": git_url,
                 }
 
@@ -654,8 +695,16 @@ def import_library_asset(
             except Exception:
                 fm = {}
 
-            canonical_name = fm.get("name") or os.path.basename(src_skill_dir)
-            dest_dir = os.path.join(lib_dir, canonical_name)
+            raw_name = fm.get("name") or os.path.basename(src_skill_dir)
+            clean_name = re.sub(r"[^a-zA-Z0-9._-]", "-", os.path.basename(raw_name.strip())).strip("-.")
+            if not clean_name:
+                clean_name = "custom-skill"
+            canonical_name = clean_name
+
+            dest_dir = os.path.abspath(os.path.join(lib_dir, canonical_name))
+            if os.path.commonpath([dest_dir, lib_dir]) != lib_dir or dest_dir == lib_dir:
+                return {"status": "error", "error": f"Invalid skill destination: {dest_dir}", "git_url": git_url}
+
             already_existed = os.path.exists(dest_dir)
 
             if already_existed and not force:
@@ -663,7 +712,10 @@ def import_library_asset(
                 message = f"Skill '{canonical_name}' already exists in central library: {dest_dir}."
             else:
                 if already_existed and force:
-                    shutil.rmtree(dest_dir)
+                    if os.path.islink(dest_dir):
+                        os.unlink(dest_dir)
+                    else:
+                        shutil.rmtree(dest_dir)
                 shutil.copytree(
                     src_skill_dir,
                     dest_dir,
@@ -688,7 +740,11 @@ def import_library_asset(
             if active_project and os.path.isdir(active_project):
                 proj_skills_dir, _ = get_harness_target_paths(active_project, active_harness)
                 os.makedirs(proj_skills_dir, exist_ok=True)
-                proj_dest_dir = os.path.join(proj_skills_dir, canonical_name)
+                proj_dest_dir = os.path.abspath(os.path.join(proj_skills_dir, canonical_name))
+                if os.path.commonpath([proj_dest_dir, proj_skills_dir]) != proj_skills_dir or proj_dest_dir == proj_skills_dir:
+                    return {"status": "error", "error": f"Invalid project destination: {proj_dest_dir}", "git_url": git_url}
+                if os.path.islink(proj_dest_dir):
+                    os.unlink(proj_dest_dir)
                 shutil.copytree(
                     dest_dir,
                     proj_dest_dir,
@@ -729,11 +785,18 @@ def import_library_asset(
             }
 
     # CASE 2: Whole repository import (plugin, package, or standalone repo)
-    repo_name = os.path.basename(clone_url)
-    if repo_name.endswith(".git"):
-        repo_name = repo_name[:-4]
+    clean_repo_name = os.path.basename(clone_url.rstrip("/\\"))
+    if clean_repo_name.endswith(".git"):
+        clean_repo_name = clean_repo_name[:-4]
+    clean_repo_name = re.sub(r"[^a-zA-Z0-9._-]", "-", clean_repo_name).strip("-.")
+    if not clean_repo_name or clean_repo_name in (".", ".."):
+        return {"status": "error", "error": f"Invalid repository URL: {git_url}", "git_url": git_url}
 
-    dest_dir = os.path.join(lib_dir, repo_name)
+    repo_name = clean_repo_name
+    dest_dir = os.path.abspath(os.path.join(lib_dir, repo_name))
+    if os.path.commonpath([dest_dir, lib_dir]) != lib_dir or dest_dir == lib_dir:
+        return {"status": "error", "error": f"Destination escapes skills library: {dest_dir}", "git_url": git_url}
+
     already_existed = os.path.exists(dest_dir)
     status = "installed"
     message = ""
@@ -743,9 +806,12 @@ def import_library_asset(
         message = f"Asset '{repo_name}' already exists in library: {dest_dir}."
     else:
         if already_existed and force:
-            shutil.rmtree(dest_dir)
+            if os.path.islink(dest_dir):
+                os.unlink(dest_dir)
+            else:
+                shutil.rmtree(dest_dir)
 
-        cmd = ["git", "clone", "--depth", "1", clone_url, dest_dir]
+        cmd = ["git", "clone", "--depth", "1", "--", clone_url, dest_dir]
         try:
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             status = "installed"
@@ -1566,14 +1632,6 @@ def sweep_project(
         for s_name in sorted(os.listdir(target_skills_dir)):
             s_path = os.path.join(target_skills_dir, s_name)
             if os.path.isdir(s_path):
-                s_norm = s_name.lower().replace("_", "-")
-                core_marker = os.path.join(s_path, CORE_MARKER_FILE)
-                if not os.path.exists(core_marker) and s_norm in CONVENTIONAL_CORE_NAMES:
-                    try:
-                        with open(core_marker, "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
                 installed_skills.append({
                     "name": s_name,
                     "path": s_path,
@@ -1585,14 +1643,6 @@ def sweep_project(
         for p_name in sorted(os.listdir(target_plugins_dir)):
             p_path = os.path.join(target_plugins_dir, p_name)
             if os.path.isdir(p_path):
-                p_norm = p_name.lower().replace("_", "-")
-                core_marker = os.path.join(p_path, CORE_MARKER_FILE)
-                if not os.path.exists(core_marker) and p_norm in CONVENTIONAL_CORE_NAMES:
-                    try:
-                        with open(core_marker, "w", encoding="utf-8") as f:
-                            f.write("# Quartermaster Core Capability\n")
-                    except Exception:
-                        pass
                 installed_plugins.append({
                     "name": p_name,
                     "path": p_path,
@@ -1786,7 +1836,10 @@ def sweep_project(
             }
             if final_auto_prune:
                 try:
-                    shutil.rmtree(s["path"])
+                    if os.path.islink(s["path"]):
+                        os.unlink(s["path"])
+                    else:
+                        shutil.rmtree(s["path"])
                     pruned_items.append(candidate)
                 except Exception as e:
                     candidate["error"] = str(e)
@@ -1859,7 +1912,10 @@ def sweep_project(
             }
             if final_auto_prune:
                 try:
-                    shutil.rmtree(p["path"])
+                    if os.path.islink(p["path"]):
+                        os.unlink(p["path"])
+                    else:
+                        shutil.rmtree(p["path"])
                     pruned_items.append(candidate)
                 except Exception as e:
                     candidate["error"] = str(e)
@@ -1867,7 +1923,12 @@ def sweep_project(
             elif final_suggest_pruning:
                 pruning_candidates.append(candidate)
 
-    synced_docs = sync_project_docs(proj_dir, active_harness, installed_skills, installed_plugins)
+    pruned_paths = {item["path"] for item in pruned_items if "path" in item}
+    pruned_names = {item["name"] for item in pruned_items if "name" in item}
+    remaining_skills = [s for s in installed_skills if s["path"] not in pruned_paths and s["name"] not in pruned_names]
+    remaining_plugins = [p for p in installed_plugins if p["path"] not in pruned_paths and p["name"] not in pruned_names]
+
+    synced_docs = sync_project_docs(proj_dir, active_harness, remaining_skills, remaining_plugins)
 
     return {
         "project_path": proj_dir,
@@ -1877,8 +1938,8 @@ def sweep_project(
         "scan_status": scan.get("status"),
         "manifests_found": scan.get("manifests_found", []),
         "technologies": scan.get("technologies", []),
-        "installed_plugins": installed_plugins,
-        "installed_skills": installed_skills,
+        "installed_plugins": remaining_plugins,
+        "installed_skills": remaining_skills,
         "additions_recommended": additions,
         "provisioned_additions": provisioned_additions,
         "auto_add_enabled": final_auto_add,
@@ -1971,6 +2032,10 @@ def mark_core(
                             pass
 
     success = len(marked_paths) > 0
+    if success and proj_dir and os.path.exists(proj_dir):
+        h = detect_harness(proj_dir)
+        sync_project_docs(proj_dir, h)
+
     return {
         "status": "marked" if success else "not_found",
         "name": name,
@@ -2057,6 +2122,10 @@ def unmark_core(
                                 pass
 
     success = len(unmarked_paths) > 0
+    if success and proj_dir and os.path.exists(proj_dir):
+        h = detect_harness(proj_dir)
+        sync_project_docs(proj_dir, h)
+
     return {
         "status": "unmarked" if success else "not_found",
         "name": name,

@@ -7,27 +7,45 @@ metadata:
 
 # Quartermaster: Project Capability Armory for OpenAI Codex
 
-Quartermaster manages repository-level capabilities in `.agents/skills/` and `.agents/plugins/`.
+Quartermaster manages repository-level capabilities in `.agents/skills/` and `.agents/plugins/`, maintaining project guidelines in `AGENTS.md`.
+
+## Engine Script Resolution
+Codex agents execute the Quartermaster Python engine via:
+```bash
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+```
+
+---
 
 ## Operational Modes
 
 ### 1. Project Scoping & Onboarding
 Inspect repository manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Dockerfile`).
-Select matching capabilities from the central armory and link them into `.agents/skills/`.
+Select matching capabilities from the central armory and provision them into `.agents/skills/`.
 
 Execute stack scan:
 ```bash
-python3 scripts/quartermaster.py --scan . --harness codex --json
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+python3 "$QM_SCRIPT" --scan . --harness codex --json
 ```
 
 When project stack is uncertain or when starting an empty repository:
 - Strictly follow the "I'm not sure yet" protocol: equip universal Core capabilities only (`spec`, `pr-review`, `pm`, `preflight`, `wayfinder`).
 - Defer framework-specific tools until codebase manifests are created.
 
+Provision approved capabilities:
+```bash
+python3 "$QM_SCRIPT" --provision . --skills <approved_names> --harness codex
+```
+
 ### 2. Capability Audit & Tidy (Sweep)
 Audit active capabilities against codebase manifests:
 ```bash
-python3 scripts/quartermaster.py --sweep . --harness codex
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+python3 "$QM_SCRIPT" --sweep . --harness codex
 ```
 
 Supported flags:
@@ -39,7 +57,9 @@ Supported flags:
 ### 3. In-Flow Git Import
 Import an external repository or extract a specific skill into the armory and active workspace:
 ```bash
-python3 scripts/quartermaster.py --import <git_url> --project . --harness codex
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+python3 "$QM_SCRIPT" --import <git_url> --project . --harness codex
 ```
 Append `--core` to mark the capability as a protected permanent guardrail.
 
@@ -48,21 +68,25 @@ Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/
 
 - List Core capabilities:
   ```bash
-  python3 scripts/quartermaster.py --core-list --project .
+  QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+  [ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+  python3 "$QM_SCRIPT" --core-list --project .
   ```
 - Add Core protection:
   ```bash
-  python3 scripts/quartermaster.py --core-add <name> --project .
+  python3 "$QM_SCRIPT" --core-add <name> --project .
   ```
 - Remove Core protection:
   ```bash
-  python3 scripts/quartermaster.py --core-rm <name> --project .
+  python3 "$QM_SCRIPT" --core-rm <name> --project .
   ```
 
 ### 5. Catalog Inspection
 List all available skills and plugins in the central armory:
 ```bash
-python3 scripts/quartermaster.py --catalog
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="scripts/quartermaster.py"
+python3 "$QM_SCRIPT" --catalog
 ```
 
 ---

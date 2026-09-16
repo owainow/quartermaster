@@ -8,6 +8,15 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_DIR="${HOME}/.claude/skills/quartermaster"
 CONFIG_DIR="${HOME}/.claude/quartermaster"
 
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes|-f|--force)
+      FORCE=1
+      ;;
+  esac
+done
+
 echo "================================================================================"
 echo "  QUARTERMASTER INSTALLER - ANTHROPIC CLAUDE CODE"
 echo "================================================================================"
@@ -20,11 +29,16 @@ fi
 mkdir -p "${HOME}/.claude/skills"
 mkdir -p "${CONFIG_DIR}"
 
+LIB_PATH="${HOME}/.claude/skills-library"
+if [ ! -d "${LIB_PATH}" ] && [ -d "${HOME}/.gemini/skills-library" ]; then
+  LIB_PATH="${HOME}/.gemini/skills-library"
+fi
+
 # Initialize default configuration if missing
 if [ ! -f "${CONFIG_DIR}/config.json" ]; then
   cat <<EOF > "${CONFIG_DIR}/config.json"
 {
-  "skills-library": "${HOME}/.gemini/skills-library",
+  "skills-library": "${LIB_PATH}",
   "auto-add": true,
   "suggest-pruning": true,
   "auto-prune": false,
@@ -34,18 +48,23 @@ EOF
 fi
 
 if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
-  echo "Existing Quartermaster skill detected at ${TARGET_DIR}."
-  read -p "Overwrite existing installation? [y/N] " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installation aborted by user."
-    exit 0
+  if [ "$FORCE" -eq 0 ]; then
+    if [ -t 0 ]; then
+      read -p "Overwrite existing installation at ${TARGET_DIR}? [y/N] " -n 1 -r
+      echo
+      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installation aborted by user."
+        exit 0
+      fi
+    else
+      echo "Non-interactive environment detected; overwriting existing installation."
+    fi
   fi
   rm -rf "${TARGET_DIR}"
 fi
 
 # Link the Claude-native skill into global Claude skills directory
-ln -s "${SCRIPT_DIR}/skills/quartermaster" "${TARGET_DIR}"
+ln -snf "${SCRIPT_DIR}/skills/quartermaster" "${TARGET_DIR}"
 
 echo ""
 echo "Quartermaster skill successfully linked to: ${TARGET_DIR}"

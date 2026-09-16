@@ -12,10 +12,15 @@ import sys
 import time
 
 SWEEP_INTERVAL_SECONDS = 86400  # 24 hours
+TIMEOUT_BACKOFF_SECONDS = 3600   # 1 hour backoff on timeout/error
 
 def main():
     try:
         cwd = os.getcwd()
+        home = os.path.expanduser("~")
+        if cwd in (home, "/", "/tmp"):
+            sys.exit(0)
+
         marker_dir = os.path.join(cwd, ".claude")
         marker_file = os.path.join(marker_dir, ".quartermaster-last-sweep")
 
@@ -30,12 +35,30 @@ def main():
             except Exception:
                 pass
 
-        # Locate quartermaster.py
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        plugin_root = os.path.abspath(os.path.join(script_dir, ".."))
-        qm_script = os.path.abspath(os.path.join(plugin_root, "..", "scripts", "quartermaster.py"))
+        # Write early timestamp to prevent session startup freeze loops
+        try:
+            os.makedirs(marker_dir, exist_ok=True)
+            with open(marker_file, "w", encoding="utf-8") as f:
+                f.write(str(now))
+        except Exception:
+            pass
 
-        if not os.path.exists(qm_script):
+        # Locate quartermaster.py dynamically
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        qm_candidates = [
+            os.environ.get("QUARTERMASTER_SCRIPT", ""),
+            os.path.expanduser("~/.claude/skills/quartermaster/scripts/quartermaster.py"),
+            os.path.abspath(os.path.join(script_dir, "..", "skills", "quartermaster", "scripts", "quartermaster.py")),
+            os.path.abspath(os.path.join(script_dir, "..", "..", "scripts", "quartermaster.py")),
+            os.path.abspath(os.path.join(script_dir, "scripts", "quartermaster.py")),
+        ]
+        qm_script = None
+        for c in qm_candidates:
+            if c and os.path.exists(c):
+                qm_script = c
+                break
+
+        if not qm_script:
             sys.exit(0)
 
         cmd = [
@@ -47,10 +70,10 @@ def main():
             "--json",
         ]
 
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if res.returncode == 0:
             data = json.loads(res.stdout)
-            adds = len(data.get("additions", []))
+            adds = len(data.get("additions_recommended", []))
             prunes = len(data.get("pruning_candidates", []))
 
             if adds > 0 or prunes > 0:
@@ -60,11 +83,15 @@ def main():
                 if prunes > 0:
                     parts.append(f"{prunes} pruning candidate(s)")
                 summary = " and ".join(parts)
-                print(f"[Quartermaster] Workspace audit recommendation: {summary} detected. Run /quartermaster sweep to align your project capabilities.")
-
-        os.makedirs(marker_dir, exist_ok=True)
-        with open(marker_file, "w", encoding="utf-8") as f:
-            f.write(str(now))
+                msg = f"[Quartermaster] Workspace audit recommendation: {summary} detected. Run /quartermaster sweep to align your project capabilities."
+                payload = {
+                    "systemMessage": msg,
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": msg,
+                    },
+                }
+                print(json.dumps(payload))
 
     except Exception:
         # Never fail or block session startup on background hook

@@ -1,9 +1,7 @@
-interface:
-  display_name: "Quartermaster"
-  short_description: "Project-scoped skill and plugin manager"
-  icon_small: "./assets/icon.png"
-  brand_color: "#10A37F"
-  default_prompt: "Use $quartermaster to audit and sweep skills in this repository."
-
-policy:
-  allow_implicit_invocation: true
+name: quartermaster
+version: 1.2.0
+description: "Project-scoped capability armory and sweep engine for OpenAI Codex."
+tools:
+  - type: bash
+    description: "Run Quartermaster armory, scan, sweep, and import commands"
+    command: "python3 ${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"

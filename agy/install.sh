@@ -7,6 +7,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_DIR="${HOME}/.gemini/config/skills/quartermaster"
 
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes|-f|--force)
+      FORCE=1
+      ;;
+  esac
+done
+
 echo "================================================================================"
 echo "  QUARTERMASTER INSTALLER - GOOGLE ANTIGRAVITY (AGY)"
 echo "================================================================================"
@@ -19,18 +28,23 @@ fi
 mkdir -p "${HOME}/.gemini/config/skills"
 
 if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
-  echo "Existing Quartermaster installation detected at ${TARGET_DIR}."
-  read -p "Overwrite existing installation? [y/N] " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installation aborted by user."
-    exit 0
+  if [ "$FORCE" -eq 0 ]; then
+    if [ -t 0 ]; then
+      read -p "Overwrite existing installation at ${TARGET_DIR}? [y/N] " -n 1 -r
+      echo
+      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installation aborted by user."
+        exit 0
+      fi
+    else
+      echo "Non-interactive environment detected; overwriting existing installation."
+    fi
   fi
   rm -rf "${TARGET_DIR}"
 fi
 
 # Create symbolic link from repo root to global skills directory
-ln -s "${REPO_ROOT}" "${TARGET_DIR}"
+ln -snf "${REPO_ROOT}" "${TARGET_DIR}"
 
 echo ""
 echo "Quartermaster successfully linked to: ${TARGET_DIR}"

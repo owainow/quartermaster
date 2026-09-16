@@ -23,6 +23,22 @@ Stop bloating agent context windows with hundreds of global skills. Quartermaste
 
 ---
 
+## Commands & Invocations
+
+Quartermaster is designed to be driven directly from agent chat:
+
+| Command / Mention | Target Harness | Action |
+| :--- | :--- | :--- |
+| **`/quartermaster`** or **`$quartermaster`** | All | Scans project manifests, guides scoping, and provisions capabilities into your repo |
+| **`/quartermaster sweep`** or **`$quartermaster sweep`** | All | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
+| **`/quartermaster import <git-url>`** | All | Clones a git repo or extracts a deep skill link into the central armory and active project |
+| **`/quartermaster core [add\|remove\|list]`** | All | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
+| **`/quartermaster catalog`** | All | Browses all available capabilities in your central library armory |
+| **`/quartermaster config`** | All | Views or updates library path, auto-add, and pruning settings |
+| **`/quartermaster schedule`** | All | Sets up or verifies the automated daily sweep for your workspace |
+
+---
+
 ## Single-Command Installation from Root
 
 Install Quartermaster with a single command tailored to your agent harness:
@@ -53,7 +69,7 @@ flowchart TD
     Central --> Engine
 
     Engine -->|"./claude/install.sh"| Claude["Claude Code Harness (claude/)\n• Target: .claude/skills/\n• Slash Command: /quartermaster\n• Context Sync: CLAUDE.md\n• Hooks: hooks/hooks.json"]
-    Engine -->|"./codex/install.sh"| Codex["OpenAI Codex Harness (codex/)\n• Target: .agents/skills/\n• Invocations: $quartermaster\n• Context Sync: AGENTS.md\n• UI Metadata: agents/openai.yaml"]
+    Engine -->|"./codex/install.sh"| Codex["OpenAI Codex Harness (codex/)\n• Target: .agents/skills/\n• Invocations: $quartermaster\n• Context Sync: AGENTS.md\n• Manifest: agents/openai.yaml"]
     Engine -->|"./agy/install.sh"| AGY["Google Antigravity Harness (agy/)\n• Target: .agents/skills/ & plugins/\n• Slash Command: /quartermaster\n• Native Scheduler: schedule tool"]
 ```
 
@@ -74,26 +90,12 @@ flowchart TD
 - **Native Discovery**: The Rust runtime of OpenAI Codex CLI natively scans `.agents/skills/` and `~/.agents/skills/` out of the box.
 - **Target Location**: Scoped skills are provisioned into `<project>/.agents/skills/<name>/`.
 - **Project Instructions (`AGENTS.md`)**: Automatically writes and updates an active capability block in `<project>/AGENTS.md`.
-- **UI & Invocations**: Includes `agents/openai.yaml` for brand color, icon, and display configuration in Codex interfaces.
+- **Manifest**: Includes `agents/openai.yaml` declaring tool contracts for Codex agent runners.
 
 ### 3. Google Antigravity (`agy/`)
 - **Invocation**: Type `/quartermaster` or `/quartermaster sweep` in chat.
 - **Target Location**: Provisions standalone skills into `.agents/skills/` and full plugins into `.agents/plugins/`.
 - **Automated Sweeps**: Registers background daily sweeps using Antigravity's native `schedule` runtime tool (`CronExpression="0 9 * * *"`).
-
----
-
-## Core Commands
-
-| Command / Mention | Action |
-| :--- | :--- |
-| **`/quartermaster`** or **`$quartermaster`** | Scans project manifests, guides scoping, and provisions capabilities into your repo |
-| **`/quartermaster sweep`** or **`$quartermaster sweep`** | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
-| **`/quartermaster import <git-url>`** | Clones a git repo or extracts a deep skill link into the central armory and active project |
-| **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
-| **`/quartermaster catalog`** | Browses all available capabilities in your central library armory |
-| **`/quartermaster config`** | Views or updates library path, auto-add, and pruning settings |
-| **`/quartermaster schedule`** | Sets up or verifies the automated daily sweep for your workspace |
 
 ---
 
@@ -135,37 +137,37 @@ Codebases evolve. Running a sweep audits your repository capabilities against ac
 
 ```text
 quartermaster/
-├── README.md                      # Multi-harness documentation & quickstart
-├── scripts/
-│   └── quartermaster.py           # Shared universal Python 3 engine (zero pip dependencies)
-├── assets/                        # Shared logos and icons
-│
-├── agy/                           # Google Antigravity harness
-│   ├── SKILL.md                   # Native AGY skill definition
-│   ├── install.sh                 # Global installer for Antigravity
-│   └── README.md                  # AGY quickstart
-│
-├── claude/                        # Anthropic Claude Code harness
-│   ├── .claude-plugin/
-│   │   └── plugin.json            # Claude Code plugin manifest
-│   ├── skills/
-│   │   └── quartermaster/
-│   │       ├── SKILL.md           # Progressive disclosure skill (user-invocable: true)
-│   │       └── references/        # Detailed on-demand runbooks
-│   ├── hooks/
-│   │   ├── hooks.json             # Lifecycle hook configuration (SessionStart)
-│   │   └── session_sweep.py       # Fast (<20ms) daily sweep check
-│   ├── install.sh                 # Global installer for Claude Code
-│   └── README.md                  # Claude Code quickstart
-│
-└── codex/                         # OpenAI Codex CLI harness
-    ├── SKILL.md                   # Codex-native skill entrypoint
-    ├── agents/
-    │   └── openai.yaml            # Codex UI & invocation policy metadata
-    ├── AGENTS.md                  # Project instructions template
-    ├── config.toml.example        # Example .codex/config.toml
-    ├── install.sh                 # Global installer for Codex CLI
-    └── README.md                  # Codex quickstart
+|-- README.md                      # Multi-harness documentation & quickstart
+|-- scripts/
+|   `-- quartermaster.py           # Shared universal Python 3 engine (zero pip dependencies)
+|-- assets/                        # Shared logos and icons
+|
+|-- agy/                           # Google Antigravity harness
+|   |-- SKILL.md                   # Native AGY skill definition
+|   |-- install.sh                 # Global installer for Antigravity
+|   `-- README.md                  # AGY quickstart
+|
+|-- claude/                        # Anthropic Claude Code harness
+|   |-- .claude-plugin/
+|   |   `-- plugin.json            # Claude Code plugin manifest
+|   |-- skills/
+|   |   `-- quartermaster/
+|   |       |-- SKILL.md           # Progressive disclosure skill (user-invocable: true)
+|   |       `-- references/        # Detailed on-demand runbooks
+|   |-- hooks/
+|   |   |-- hooks.json             # Lifecycle hook configuration (SessionStart)
+|   |   `-- session_sweep.py       # Fast (<20ms) daily sweep check
+|   |-- install.sh                 # Global installer for Claude Code
+|   `-- README.md                  # Claude Code quickstart
+|
+`-- codex/                         # OpenAI Codex CLI harness
+    |-- SKILL.md                   # Codex-native skill entrypoint
+    |-- agents/
+    |   `-- openai.yaml            # Codex UI & invocation policy metadata
+    |-- AGENTS.md                  # Project instructions template
+    |-- config.json.example        # Example ~/.codex/quartermaster/config.json
+    |-- install.sh                 # Global installer for Codex CLI
+    `-- README.md                  # Codex quickstart
 ```
 
 ---

@@ -1,10 +1,10 @@
 # Agent Guidelines: Quartermaster Capability Governance
 
-This repository uses Quartermaster to manage repository-scoped capabilities in `.agents/skills/`.
-
-## Active Capabilities (Managed by Quartermaster)
-
 <!-- QUARTERMASTER_START -->
+## Active Agent Capabilities (Managed by Quartermaster)
+
+This repository uses Quartermaster to manage project-scoped capabilities in `.agents/skills/`.
+
 | Capability | Type | Path | Status |
 | :--- | :--- | :--- | :--- |
 | `spec` | Skill | `.agents/skills/spec` | Core (Protected) |
