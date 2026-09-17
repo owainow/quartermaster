@@ -10,7 +10,7 @@ From the repository root:
 ./claude/install.sh
 ```
 
-This links Quartermaster into `~/.claude/skills/quartermaster`. Claude Code automatically discovers user skills in `~/.claude/skills/`, making `/quartermaster` immediately available in all projects across your machine.
+This installs a self-contained, relocation-proof copy of Quartermaster into `~/.claude/skills/quartermaster` (pass `--dev` or `--link` to symlink directly to your active repository for live development). Claude Code automatically discovers user skills in `~/.claude/skills/`, making `/quartermaster` immediately available in all projects across your machine.
 
 ---
 

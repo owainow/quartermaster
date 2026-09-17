@@ -29,15 +29,32 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-# Configuration Paths
-GLOBAL_CONFIG_DIR = os.path.expanduser("~/.gemini/quartermaster")
-GLOBAL_CONFIG_FILE = os.path.join(GLOBAL_CONFIG_DIR, "config.json")
-FALLBACK_CONFIG_FILE = os.path.expanduser("~/.quartermaster/config.json")
+def normalize_path(path: Optional[str]) -> str:
+    """
+    Expands user tilde (~), handles Windows MSYS/Git-Bash drive paths (/c/... -> C:/...),
+    and returns a normalized absolute path.
+    """
+    if not path:
+        return ""
+    p = str(path).strip()
+    if sys.platform == "win32":
+        m = re.match(r"^/([a-zA-Z])(?:/(.*))?$", p)
+        if m:
+            drive = m.group(1).upper()
+            rest = m.group(2) or ""
+            p = f"{drive}:/{rest}"
+    return os.path.abspath(os.path.expanduser(p))
 
-CLAUDE_CONFIG_DIR = os.path.expanduser("~/.claude/quartermaster")
+
+# Configuration Paths
+GLOBAL_CONFIG_DIR = normalize_path("~/.gemini/quartermaster")
+GLOBAL_CONFIG_FILE = os.path.join(GLOBAL_CONFIG_DIR, "config.json")
+FALLBACK_CONFIG_FILE = normalize_path("~/.quartermaster/config.json")
+
+CLAUDE_CONFIG_DIR = normalize_path("~/.claude/quartermaster")
 CLAUDE_CONFIG_FILE = os.path.join(CLAUDE_CONFIG_DIR, "config.json")
 
-CODEX_CONFIG_DIR = os.path.expanduser("~/.codex/quartermaster")
+CODEX_CONFIG_DIR = normalize_path("~/.codex/quartermaster")
 CODEX_CONFIG_FILE = os.path.join(CODEX_CONFIG_DIR, "config.json")
 
 CONFIG_SEARCH_PATHS = [
@@ -47,13 +64,13 @@ CONFIG_SEARCH_PATHS = [
     FALLBACK_CONFIG_FILE,
 ]
 
-DEFAULT_LIBRARY_PATH = os.path.expanduser("~/.gemini/skills-library")
+DEFAULT_LIBRARY_PATH = "~/.gemini/skills-library"
 
 PROBE_LIBRARY_DIRS = [
-    os.path.expanduser("~/.gemini/skills-library"),
-    os.path.expanduser("~/.claude/skills-library"),
-    os.path.expanduser("~/.agents/skills-library"),
-    os.path.expanduser("~/.quartermaster/skills-library"),
+    "~/.gemini/skills-library",
+    "~/.claude/skills-library",
+    "~/.agents/skills-library",
+    "~/.quartermaster/skills-library",
 ]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -118,7 +135,7 @@ def detect_harness(project_path: Optional[str] = None, explicit_harness: Optiona
     if os.environ.get("CODEX_HOME") or os.environ.get("CODEX_CLI"):
         return "codex"
 
-    probe_dir = os.path.abspath(os.path.expanduser(project_path)) if project_path else os.getcwd()
+    probe_dir = normalize_path(project_path) if project_path else os.getcwd()
 
     if os.path.exists(os.path.join(probe_dir, ".claude")) or os.path.exists(os.path.join(probe_dir, "CLAUDE.md")):
         return "claude"
@@ -127,15 +144,15 @@ def detect_harness(project_path: Optional[str] = None, explicit_harness: Optiona
     if os.path.exists(os.path.join(probe_dir, ".gemini")):
         return "agy"
     if os.path.exists(os.path.join(probe_dir, ".agents")):
-        if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+        if os.path.exists(normalize_path("~/.codex")) and not os.path.exists(normalize_path("~/.gemini")):
             return "codex"
         return "agy"
 
-    if os.path.exists(os.path.expanduser("~/.claude")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+    if os.path.exists(normalize_path("~/.claude")) and not os.path.exists(normalize_path("~/.gemini")):
         return "claude"
-    if os.path.exists(os.path.expanduser("~/.codex")) and not os.path.exists(os.path.expanduser("~/.gemini")):
+    if os.path.exists(normalize_path("~/.codex")) and not os.path.exists(normalize_path("~/.gemini")):
         return "codex"
-    if os.path.exists(os.path.expanduser("~/.gemini")):
+    if os.path.exists(normalize_path("~/.gemini")):
         return "agy"
 
     return "agy"
@@ -147,7 +164,7 @@ def get_harness_target_paths(project_path: str, harness: str) -> Tuple[str, str]
     - claude: <project>/.claude/skills and "" (Claude Code discovers .claude/skills only)
     - agy / codex / universal: <project>/.agents/skills and <project>/.agents/plugins
     """
-    proj = os.path.abspath(os.path.expanduser(project_path))
+    proj = normalize_path(project_path)
     if harness == "claude":
         claude_skills = os.path.join(proj, ".claude", "skills")
         return (claude_skills, "")
@@ -197,7 +214,7 @@ def sync_claude_md(
         s_name = s["name"]
         s_path = s.get("path", f".claude/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
-        rel_path = os.path.relpath(s_path_full, project_path)
+        rel_path = os.path.relpath(s_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
@@ -206,7 +223,7 @@ def sync_claude_md(
         p_name = p["name"]
         p_path = p.get("path", f".claude/skills/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
-        rel_path = os.path.relpath(p_path_full, project_path)
+        rel_path = os.path.relpath(p_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
@@ -224,7 +241,7 @@ def sync_claude_md(
 
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
-        updated = pattern.sub(new_block, content)
+        updated = pattern.sub(lambda _: new_block, content)
     else:
         if content.strip():
             updated = content.rstrip() + "\n\n" + new_block + "\n"
@@ -274,7 +291,7 @@ def sync_agents_md(
         s_name = s["name"]
         s_path = s.get("path", f".agents/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
-        rel_path = os.path.relpath(s_path_full, project_path)
+        rel_path = os.path.relpath(s_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
@@ -283,7 +300,7 @@ def sync_agents_md(
         p_name = p["name"]
         p_path = p.get("path", f".agents/plugins/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
-        rel_path = os.path.relpath(p_path_full, project_path)
+        rel_path = os.path.relpath(p_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
@@ -301,7 +318,7 @@ def sync_agents_md(
 
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
-        updated = pattern.sub(new_block, content)
+        updated = pattern.sub(lambda _: new_block, content)
     else:
         if content.strip():
             updated = content.rstrip() + "\n\n" + new_block + "\n"
@@ -324,7 +341,7 @@ def sync_project_docs(
     """
     Synchronizes project context files (CLAUDE.md, AGENTS.md) based on active harness.
     """
-    proj = os.path.abspath(os.path.expanduser(project_path))
+    proj = normalize_path(project_path)
     results: Dict[str, Optional[str]] = {}
 
     if active_skills is None or active_plugins is None:
@@ -463,7 +480,10 @@ def set_config_value(key: str, value: Any, harness: Optional[str] = None) -> Dic
         v_str = str(value).strip()
         if not v_str:
             raise ValueError("skills-library path cannot be empty.")
-        cfg[key_norm] = os.path.abspath(os.path.expanduser(v_str))
+        if v_str.startswith("~"):
+            cfg[key_norm] = v_str
+        else:
+            cfg[key_norm] = normalize_path(v_str)
 
     save_config(cfg, harness)
     return cfg
@@ -481,23 +501,24 @@ def resolve_library_path(custom_path: Optional[str] = None, harness: Optional[st
        - agy / fallback: ~/.gemini/skills-library
     """
     if custom_path:
-        return os.path.abspath(os.path.expanduser(custom_path))
+        return normalize_path(custom_path)
 
     cfg = load_config(harness)
     configured_lib = cfg.get("skills-library")
     if configured_lib:
-        return os.path.abspath(os.path.expanduser(configured_lib))
+        return normalize_path(configured_lib)
 
     for p in PROBE_LIBRARY_DIRS:
-        if os.path.exists(p):
-            return p
+        norm_p = normalize_path(p)
+        if os.path.exists(norm_p):
+            return norm_p
 
     if harness == "claude":
-        return os.path.abspath(os.path.expanduser("~/.claude/skills-library"))
+        return normalize_path("~/.claude/skills-library")
     elif harness == "codex":
-        return os.path.abspath(os.path.expanduser("~/.agents/skills-library"))
+        return normalize_path("~/.agents/skills-library")
 
-    return os.path.abspath(DEFAULT_LIBRARY_PATH)
+    return normalize_path(DEFAULT_LIBRARY_PATH)
 
 
 def interactive_config() -> None:
@@ -535,15 +556,16 @@ def interactive_config() -> None:
             current = cfg.get("skills-library", DEFAULT_LIBRARY_PATH)
             new_val = input(f"Enter new skills-library path [{current}]: ").strip()
             if new_val:
-                expanded = os.path.abspath(os.path.expanduser(new_val))
+                expanded = normalize_path(new_val)
                 if not os.path.exists(expanded):
                     print(f"\nWarning: Path does not exist on disk: {expanded}")
                     confirm = input("Save anyway? (y/N): ").strip().lower()
                     if confirm != "y":
                         print("Operation cancelled.")
                         return
-                set_config_value("skills-library", expanded)
-                print(f"\nUpdated 'skills-library' to: {expanded}")
+                val_to_save = new_val if new_val.startswith("~") else expanded
+                set_config_value("skills-library", val_to_save)
+                print(f"\nUpdated 'skills-library' to: {val_to_save}")
         elif choice == "2":
             new_val = not cfg.get("auto-add", True)
             set_config_value("auto-add", new_val)
@@ -580,14 +602,14 @@ def find_project_root(start_dir: Optional[str] = None) -> Optional[str]:
     Returns the absolute path to the project root, or None if outside a project.
     """
     if start_dir:
-        curr = os.path.abspath(os.path.expanduser(start_dir))
+        curr = normalize_path(start_dir)
     else:
-        curr = os.path.abspath(os.getcwd())
+        curr = normalize_path(os.getcwd())
 
-    home = os.path.abspath(os.path.expanduser("~"))
+    home = normalize_path("~")
 
     # Never treat user home or filesystem root as a project
-    if curr == home or curr == "/":
+    if curr == home or curr == "/" or (sys.platform == "win32" and os.path.splitdrive(curr)[1] in ("", "\\", "/")):
         return None
 
     markers = {
@@ -611,10 +633,15 @@ def find_project_root(start_dir: Optional[str] = None) -> Optional[str]:
 
     probe = curr
     while probe and probe != home and probe != "/":
+        if sys.platform == "win32" and os.path.splitdrive(probe)[1] in ("", "\\", "/"):
+            break
         for m in markers:
             if os.path.exists(os.path.join(probe, m)):
                 return probe
-        probe = os.path.dirname(probe)
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
 
     return None
 
@@ -712,7 +739,7 @@ def import_library_asset(
     # Determine if we should outfit into an active project
     active_project = None
     if project_path:
-        active_project = find_project_root(project_path) or os.path.abspath(os.path.expanduser(project_path))
+        active_project = find_project_root(project_path) or normalize_path(project_path)
     else:
         active_project = find_project_root()
 
@@ -1145,7 +1172,7 @@ def detect_stack(
     Identifies frameworks, detects uninitialized projects,
     and returns tailored recommendations.
     """
-    proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    proj_dir = normalize_path(project_path)
     if not os.path.exists(proj_dir):
         return {
             "project_path": proj_dir,
@@ -1567,7 +1594,7 @@ def provision_assets(
     - claude: <project>/.claude/skills/
     - agy / codex: <project>/.agents/skills/ and <project>/.agents/plugins/
     """
-    proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    proj_dir = normalize_path(project_path)
     os.makedirs(proj_dir, exist_ok=True)
 
     active_harness = detect_harness(proj_dir, harness)
@@ -1849,7 +1876,7 @@ def sweep_project(
        - If suggest_pruning is True: lists them as removal recommendations.
        - If auto_prune is True and check_only is False: automatically uninstalls them.
     """
-    proj_dir = os.path.abspath(os.path.expanduser(project_path))
+    proj_dir = normalize_path(project_path)
     active_harness = detect_harness(proj_dir, harness)
     cfg = load_config(active_harness)
 
@@ -2238,7 +2265,7 @@ def mark_core(
 
     proj_dir = None
     if project_path:
-        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+        proj_dir = normalize_path(project_path)
     else:
         proj_dir = find_project_root()
 
@@ -2328,7 +2355,7 @@ def unmark_core(
 
     proj_dir = None
     if project_path:
-        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+        proj_dir = normalize_path(project_path)
     else:
         proj_dir = find_project_root()
 
@@ -2414,7 +2441,7 @@ def list_core(
     lib_path = resolve_library_path(library_path)
     proj_dir = None
     if project_path:
-        proj_dir = os.path.abspath(os.path.expanduser(project_path))
+        proj_dir = normalize_path(project_path)
     else:
         proj_dir = find_project_root()
 

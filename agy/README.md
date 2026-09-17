@@ -10,6 +10,8 @@ From the repository root:
 ./agy/install.sh
 ```
 
+This installs a self-contained, relocation-proof copy of Quartermaster into `~/.gemini/config/skills/quartermaster` (pass `--dev` or `--link` to symlink directly to your active repository for live development).
+
 Or clone directly into Antigravity's global customization directory:
 
 ```bash

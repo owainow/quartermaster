@@ -10,7 +10,7 @@ From the repository root:
 ./codex/install.sh
 ```
 
-This links Quartermaster into `~/.agents/skills/quartermaster`. Because OpenAI Codex CLI natively scans `~/.agents/skills/` and `<project>/.agents/skills/` out of the box, Quartermaster is immediately active in all your repositories.
+This installs a self-contained, relocation-proof copy of Quartermaster into `~/.agents/skills/quartermaster` and `~/.codex/skills/quartermaster` (pass `--dev` or `--link` to symlink directly to your active repository for live development). Because OpenAI Codex CLI natively scans `~/.agents/skills/` and `<project>/.agents/skills/` out of the box, Quartermaster is immediately active in all your repositories.
 
 ---
 

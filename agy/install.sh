@@ -41,7 +41,9 @@ if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
         exit 0
       fi
     else
-      echo "Non-interactive environment detected; overwriting existing installation."
+      echo "Error: Existing installation found at ${TARGET_DIR}." >&2
+      echo "In non-interactive mode, pass --force or -y to overwrite." >&2
+      exit 1
     fi
   fi
   rm -rf "${TARGET_DIR}"

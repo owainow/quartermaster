@@ -45,9 +45,9 @@ Install Quartermaster with a single command tailored to your agent harness:
 
 | Agent Harness | Single Installation Command | What It Does |
 | :--- | :--- | :--- |
-| **Anthropic Claude Code** | `./claude/install.sh` | Links to `~/.claude/skills/quartermaster`, enabling `/quartermaster` everywhere across your machine |
-| **OpenAI Codex CLI** | `./codex/install.sh` | Links to `~/.agents/skills/quartermaster`, natively discovered by Codex CLI for `/quartermaster` |
-| **Google Antigravity (AGY)** | `./agy/install.sh` | Links to `~/.gemini/config/skills/quartermaster`, enabling `/quartermaster` in all AGY workspaces |
+| **Anthropic Claude Code** | `./claude/install.sh` | Installs standalone copy to `~/.claude/skills/quartermaster` (or links with `--dev`), enabling `/quartermaster` everywhere across your machine |
+| **OpenAI Codex CLI** | `./codex/install.sh` | Installs standalone copy to `~/.agents/skills/quartermaster` (or links with `--dev`), natively discovered by Codex CLI for `/quartermaster` |
+| **Google Antigravity (AGY)** | `./agy/install.sh` | Installs standalone copy to `~/.gemini/config/skills/quartermaster` (or links with `--dev`), enabling `/quartermaster` in all AGY workspaces |
 
 ---
 
