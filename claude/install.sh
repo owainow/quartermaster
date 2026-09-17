@@ -33,9 +33,9 @@ fi
 mkdir -p "${HOME}/.claude/skills"
 mkdir -p "${CONFIG_DIR}"
 
-LIB_PATH="${HOME}/.claude/skills-library"
-if [ ! -d "${LIB_PATH}" ] && [ -d "${HOME}/.gemini/skills-library" ]; then
-  LIB_PATH="${HOME}/.gemini/skills-library"
+LIB_PATH="~/.claude/skills-library"
+if [ ! -d "${HOME}/.claude/skills-library" ] && [ -d "${HOME}/.gemini/skills-library" ]; then
+  LIB_PATH="~/.gemini/skills-library"
 fi
 
 # Initialize default configuration if missing
@@ -61,7 +61,9 @@ if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
         exit 0
       fi
     else
-      echo "Non-interactive environment detected; overwriting existing installation."
+      echo "Error: Existing installation found at ${TARGET_DIR}." >&2
+      echo "In non-interactive mode, pass --force or -y to overwrite." >&2
+      exit 1
     fi
   fi
   rm -rf "${TARGET_DIR}"

@@ -35,9 +35,9 @@ mkdir -p "${HOME}/.agents/skills"
 mkdir -p "${HOME}/.codex/skills"
 mkdir -p "${CONFIG_DIR}"
 
-LIB_PATH="${HOME}/.agents/skills-library"
-if [ ! -d "${LIB_PATH}" ] && [ -d "${HOME}/.gemini/skills-library" ]; then
-  LIB_PATH="${HOME}/.gemini/skills-library"
+LIB_PATH="~/.agents/skills-library"
+if [ ! -d "${HOME}/.agents/skills-library" ] && [ -d "${HOME}/.gemini/skills-library" ]; then
+  LIB_PATH="~/.gemini/skills-library"
 fi
 
 # Initialize default configuration if missing
@@ -63,7 +63,9 @@ if [ -e "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ] || [ -e "${CODEX_TARGET_DIR}
         exit 0
       fi
     else
-      echo "Non-interactive environment detected; overwriting existing installation."
+      echo "Error: Existing installation found at ${TARGET_DIR}." >&2
+      echo "In non-interactive mode, pass --force or -y to overwrite." >&2
+      exit 1
     fi
   fi
   rm -rf "${TARGET_DIR}" "${CODEX_TARGET_DIR}"
