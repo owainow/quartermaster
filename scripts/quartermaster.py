@@ -214,7 +214,7 @@ def sync_claude_md(
         s_name = s["name"]
         s_path = s.get("path", f".claude/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
-        rel_path = os.path.relpath(s_path_full, project_path)
+        rel_path = os.path.relpath(s_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
@@ -223,7 +223,7 @@ def sync_claude_md(
         p_name = p["name"]
         p_path = p.get("path", f".claude/skills/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
-        rel_path = os.path.relpath(p_path_full, project_path)
+        rel_path = os.path.relpath(p_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
@@ -241,7 +241,7 @@ def sync_claude_md(
 
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
-        updated = pattern.sub(new_block, content)
+        updated = pattern.sub(lambda _: new_block, content)
     else:
         if content.strip():
             updated = content.rstrip() + "\n\n" + new_block + "\n"
@@ -291,7 +291,7 @@ def sync_agents_md(
         s_name = s["name"]
         s_path = s.get("path", f".agents/skills/{s_name}")
         s_path_full = s_path if os.path.isabs(s_path) else os.path.join(project_path, s_path)
-        rel_path = os.path.relpath(s_path_full, project_path)
+        rel_path = os.path.relpath(s_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(s_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{s_name}` | Skill | `{rel_path}` | {status} |")
@@ -300,7 +300,7 @@ def sync_agents_md(
         p_name = p["name"]
         p_path = p.get("path", f".agents/plugins/{p_name}")
         p_path_full = p_path if os.path.isabs(p_path) else os.path.join(project_path, p_path)
-        rel_path = os.path.relpath(p_path_full, project_path)
+        rel_path = os.path.relpath(p_path_full, project_path).replace("\\", "/")
         is_core = os.path.exists(os.path.join(p_path_full, CORE_MARKER_FILE))
         status = "Core (Protected)" if is_core else "Active"
         block_lines.append(f"| `{p_name}` | Plugin | `{rel_path}` | {status} |")
@@ -318,7 +318,7 @@ def sync_agents_md(
 
     pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
     if pattern.search(content):
-        updated = pattern.sub(new_block, content)
+        updated = pattern.sub(lambda _: new_block, content)
     else:
         if content.strip():
             updated = content.rstrip() + "\n\n" + new_block + "\n"
