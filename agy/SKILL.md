@@ -1,6 +1,6 @@
 ---
 name: quartermaster
-description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, manages deterministic Core capabilities (.core marker files), and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster import <git-url>, /quartermaster core [add|remove|list], /quartermaster catalog, /quartermaster config, or /quartermaster schedule.
+description: Intelligent project onboarding, skill & plugin armory, and automated sweep engine. References an external skills library, imports git repositories directly into the central library, provisions scoped skills (.agents/skills/) and full plugins (.agents/plugins/), scopes brand-new projects with 'I'm not sure yet' fallback, manages deterministic Core capabilities (.core marker files), updates workspace tools from armory, and conducts periodic sweeps with pruning governance. Trigger with /quartermaster, /quartermaster sweep, /quartermaster update, /quartermaster import <git-url>, /quartermaster core [add|remove|list], /quartermaster catalog, /quartermaster config, or /quartermaster schedule.
 ---
 
 # Quartermaster: Project Onboarding & Skill Provisioning Armory
@@ -17,6 +17,7 @@ Quartermaster references an external central **skills library** (default: `~/.ge
 | :--- | :--- |
 | **`/quartermaster`** | Run 5-stage workspace recon, scoping, capability provisioning, and auto-schedule |
 | **`/quartermaster sweep`** | Audit active tools, recommend additions, and suggest or auto-prune unneeded tools |
+| **`/quartermaster update`** | Refresh and sync workspace skills and plugins with central library while strictly preserving `.core` |
 | **`/quartermaster import <git-url>`** | Clones a git repo into your central armory and auto-equips it into your active project |
 | **`/quartermaster core [add\|remove\|list]`** | Designate or remove Core capabilities via deterministic `.core` marker files |
 | **`/quartermaster catalog`** | Browse all packages, plugins, and skills available in the central library |
@@ -152,7 +153,32 @@ Flags supported:
 
 ---
 
-## Command 3: In-Flow Git Import (`/quartermaster import <git-url>`)
+## Command 3: Armory Update Engine (`/quartermaster update`)
+
+When skills or plugins in your central armory have been upgraded, improved, or edited, run `/quartermaster update` to synchronize your active project capabilities with the central skills library.
+
+### Execution:
+```bash
+# Update all installed skills and plugins in the active workspace
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --update --project <project_path>
+
+# Update specific targeted capabilities
+python3 ~/.gemini/config/skills/quartermaster/scripts/quartermaster.py --update <name1,name2> --project <project_path>
+```
+
+### Key Behaviors:
+1. **Dual Synchronization**: Syncs both standalone skills (`<project>/.agents/skills/`) and full plugins (`<project>/.agents/plugins/`) directly from your configured skills library (`~/.gemini/skills-library/`).
+2. **Strict `.core` Marker Preservation**: If a workspace tool contains a `.core` marker file, Quartermaster strictly preserves that marker during the update so permanent workflow guardrails are never lost. If the central library version is marked as Core, the workspace tool also adopts Core protection.
+3. **Targeted or Workspace-Wide**:
+   - `/quartermaster update`: Audits all installed tools in the project and refreshes them from the armory.
+   - `/quartermaster update <name1,name2>`: Updates only the specified tools or packages.
+4. **Unmanaged Local Tools Safety**: Custom project tools created directly in your repository that do not exist in the central armory are safely preserved and skipped without risk of deletion or overwrite.
+5. **Atomic Updates**: Uses staging directories to replace assets cleanly, eliminating partial writes or file corruption.
+6. **Project Context Sync**: Automatically updates project context documentation (`CLAUDE.md` and/or `AGENTS.md`) to reflect current capability states.
+
+---
+
+## Command 4: In-Flow Git Import (`/quartermaster import <git-url>`)
 
 When the user pastes a repository URL or a direct link to a specific skill in chat:
 ```text
@@ -175,7 +201,7 @@ Quartermaster performs dual action:
 
 ---
 
-## Command 4: Core Capability Governance (`/quartermaster core [add|remove|list]`)
+## Command 5: Core Capability Governance (`/quartermaster core [add|remove|list]`)
 
 Quartermaster uses a deterministic `.core` marker file inside skill and plugin folders to identify permanent guardrails. Core capabilities are always auto-equipped on onboarding and are strictly immune to sweep pruning.
 
@@ -206,7 +232,7 @@ Deletes the `.core` marker file, returning the capability to standard stack-alig
 
 ---
 
-## Command 5: Browse Catalog (`/quartermaster catalog`)
+## Command 6: Browse Catalog (`/quartermaster catalog`)
 
 When the user runs `/quartermaster catalog`, execute:
 ```bash
@@ -216,7 +242,7 @@ Present the discovered packages, plugins, and skills from the central library, c
 
 ---
 
-## Command 6: Settings & Config (`/quartermaster config`)
+## Command 7: Settings & Config (`/quartermaster config`)
 
 When the user asks to view or change settings:
 ```bash
@@ -238,7 +264,7 @@ Settings keys:
 
 ---
 
-## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
+## Command 8: Schedule Daily Sweep (`/quartermaster schedule`)
 
 When the user runs `/quartermaster schedule`:
 1. Actively call the `schedule` tool:

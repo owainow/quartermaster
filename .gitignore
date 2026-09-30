@@ -5,4 +5,6 @@ __pycache__/
 *.so
 .agents/
 .quartermaster_cache.json
+.coverage
+.pytest_cache/
 

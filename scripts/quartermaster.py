@@ -9,6 +9,7 @@ Features:
 - External central library referencing (default: ~/.gemini/skills-library)
 - Dynamic in-flow git imports (--import <git-url>) directly into central library
 - Dual provisioning: Full plugins (.agents/plugins/) and standalone skills (.agents/skills/)
+- Native update engine (--update) syncing workspace tools with central armory
 - Clean capability tiers: Core Capabilities (deterministic .core marker) vs Stack-Specific
 - Interactive brand-new project scoping with "I'm not sure yet" fallback
 - Project sweep (--sweep) for ongoing audits (auto-equip and pruning governance)
@@ -1852,6 +1853,317 @@ def provision_assets(
 
 
 # ==============================================================================
+# Quartermaster Armory Update Engine (Capability Synchronization)
+# ==============================================================================
+
+def update_project_assets(
+    project_path: Optional[str] = None,
+    asset_names: Optional[List[str]] = None,
+    library_path: Optional[str] = None,
+    harness: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Syncs installed project capabilities with their upstream definitions in the skills library:
+    - Standalone skills: <project>/.agents/skills/ or <project>/.claude/skills/
+    - Full plugins: <project>/.agents/plugins/
+
+    Supports:
+    - Updating all installed workspace capabilities (when asset_names is None, empty, or ['all'])
+    - Updating targeted capabilities (when asset_names is specified)
+    - Strictly preserving existing .core marker files in workspace to protect permanent guardrails
+    - Adopting .core designation if upstream armory asset is marked as core
+    - Safely skipping unmanaged local custom tools not found in central library
+    - Atomically updating files to prevent corruption or data loss
+    - Synchronizing project agent context documentation (CLAUDE.md / AGENTS.md)
+    """
+    if project_path:
+        proj_dir = normalize_path(project_path)
+    else:
+        proj_dir = find_project_root() or os.getcwd()
+
+    os.makedirs(proj_dir, exist_ok=True)
+    active_harness = detect_harness(proj_dir, harness)
+    target_skills_dir, target_plugins_dir = get_harness_target_paths(proj_dir, active_harness)
+
+    catalog = get_catalog(library_path, harness=active_harness)
+    all_skills = catalog.get("skills", [])
+    all_plugins = catalog.get("plugins", [])
+
+    plugin_map: Dict[str, Dict[str, Any]] = {}
+    for p in all_plugins:
+        p_name = p["name"].lower()
+        plugin_map[p_name] = p
+        plugin_map[p_name.replace("-plugin", "")] = p
+        plugin_map[p_name.replace("_", "-")] = p
+        plugin_map[p["package"].lower()] = p
+
+    skill_map: Dict[str, Dict[str, Any]] = {}
+    skill_by_pkg: Dict[str, List[Dict[str, Any]]] = {}
+    for s in all_skills:
+        s_name = s["name"].lower()
+        skill_map[s_name] = s
+        skill_map[s_name.replace("-", "_")] = s
+        skill_map[s_name.replace("_", "-")] = s
+        skill_map[s["dir_name"].lower()] = s
+        skill_by_pkg.setdefault(s["package"].lower(), []).append(s)
+
+    installed_skills: List[Dict[str, Any]] = []
+    if target_skills_dir and os.path.exists(target_skills_dir):
+        for s_name in sorted(os.listdir(target_skills_dir)):
+            s_path = os.path.join(target_skills_dir, s_name)
+            if os.path.isdir(s_path):
+                has_core = os.path.exists(os.path.join(s_path, CORE_MARKER_FILE))
+                installed_skills.append({
+                    "name": s_name,
+                    "path": s_path,
+                    "type": "skill",
+                    "has_core": has_core,
+                })
+
+    installed_plugins: List[Dict[str, Any]] = []
+    if target_plugins_dir and os.path.exists(target_plugins_dir):
+        for p_name in sorted(os.listdir(target_plugins_dir)):
+            p_path = os.path.join(target_plugins_dir, p_name)
+            if os.path.isdir(p_path):
+                has_core = os.path.exists(os.path.join(p_path, CORE_MARKER_FILE))
+                installed_plugins.append({
+                    "name": p_name,
+                    "path": p_path,
+                    "type": "plugin",
+                    "has_core": has_core,
+                })
+
+    expanded_requests: List[str] = []
+    if asset_names:
+        for item in asset_names:
+            if isinstance(item, str):
+                for sub in item.split(","):
+                    sub_c = sub.strip()
+                    if sub_c:
+                        expanded_requests.append(sub_c)
+            elif isinstance(item, (list, tuple)):
+                for sub in item:
+                    sub_c = str(sub).strip()
+                    if sub_c:
+                        expanded_requests.append(sub_c)
+
+    is_update_all = (not expanded_requests) or any(r.lower() == "all" for r in expanded_requests)
+
+    updated: List[Dict[str, Any]] = []
+    preserved_core: List[str] = []
+    skipped_unmanaged: List[Dict[str, Any]] = []
+    not_found: List[str] = []
+    seen_destinations: Set[str] = set()
+
+    def sync_item(src_dir: str, dest_dir: str, name: str, item_type: str, pkg: str, tier: str) -> None:
+        if dest_dir in seen_destinations:
+            return
+        seen_destinations.add(dest_dir)
+
+        dest_marker = os.path.join(dest_dir, CORE_MARKER_FILE)
+        dest_had_core = os.path.exists(dest_marker)
+        core_content = "# Quartermaster Core Capability\n"
+        if dest_had_core:
+            try:
+                with open(dest_marker, "r", encoding="utf-8") as f:
+                    core_content = f.read()
+            except Exception:
+                pass
+
+        src_marker = os.path.join(src_dir, CORE_MARKER_FILE)
+        src_has_core = os.path.exists(src_marker) or (tier == "core")
+        preserve_core = dest_had_core or src_has_core
+
+        staging_dir = f"{dest_dir}.tmp.{os.getpid()}"
+        if os.path.exists(staging_dir):
+            if os.path.islink(staging_dir):
+                os.unlink(staging_dir)
+            else:
+                shutil.rmtree(staging_dir)
+
+        shutil.copytree(
+            src_dir,
+            staging_dir,
+            ignore=shutil.ignore_patterns(".git", ".DS_Store", "__pycache__"),
+        )
+
+        if preserve_core:
+            staging_marker = os.path.join(staging_dir, CORE_MARKER_FILE)
+            try:
+                with open(staging_marker, "w", encoding="utf-8") as f:
+                    f.write(core_content or "# Quartermaster Core Capability\n")
+            except Exception:
+                pass
+
+        if os.path.islink(dest_dir):
+            os.unlink(dest_dir)
+        elif os.path.exists(dest_dir):
+            shutil.rmtree(dest_dir)
+
+        os.makedirs(os.path.dirname(dest_dir), exist_ok=True)
+        shutil.move(staging_dir, dest_dir)
+
+        file_count = sum(len(files) for _, _, files in os.walk(dest_dir))
+        if preserve_core and name not in preserved_core:
+            preserved_core.append(name)
+
+        updated.append({
+            "name": name,
+            "type": item_type,
+            "package": pkg,
+            "tier": "core" if preserve_core else tier,
+            "source": src_dir,
+            "destination": dest_dir,
+            "files_copied": file_count,
+            "has_core": preserve_core,
+            "status": "updated",
+        })
+
+    if is_update_all:
+        # 1. Update all installed plugins
+        for p in installed_plugins:
+            p_norm = p["name"].lower().replace("_", "-")
+            plugin = plugin_map.get(p_norm) or plugin_map.get(p["name"].lower())
+            if plugin:
+                sync_item(
+                    src_dir=plugin["source_dir"],
+                    dest_dir=p["path"],
+                    name=plugin["name"],
+                    item_type="plugin",
+                    pkg=plugin["package"],
+                    tier=plugin["tier"],
+                )
+            else:
+                skipped_unmanaged.append({
+                    "name": p["name"],
+                    "path": p["path"],
+                    "type": "plugin",
+                    "reason": "Not present in central skills library",
+                })
+
+        # 2. Update all installed skills
+        for s in installed_skills:
+            s_norm = s["name"].lower().replace("_", "-")
+            skill = skill_map.get(s_norm) or skill_map.get(s["name"].lower())
+            if skill:
+                sync_item(
+                    src_dir=skill["source_dir"],
+                    dest_dir=s["path"],
+                    name=skill["name"],
+                    item_type="skill",
+                    pkg=skill["package"],
+                    tier=skill["tier"],
+                )
+            else:
+                # In Claude harness or similar, check if this skill belongs to a plugin in library
+                matched_inner = None
+                for pl in all_plugins:
+                    inner_dir = os.path.join(pl["source_dir"], "skills", s["name"])
+                    if os.path.exists(os.path.join(inner_dir, "SKILL.md")):
+                        matched_inner = {
+                            "source_dir": inner_dir,
+                            "name": s["name"],
+                            "package": pl["package"],
+                            "tier": pl["tier"],
+                        }
+                        break
+                if matched_inner:
+                    sync_item(
+                        src_dir=matched_inner["source_dir"],
+                        dest_dir=s["path"],
+                        name=matched_inner["name"],
+                        item_type="skill",
+                        pkg=matched_inner["package"],
+                        tier=matched_inner["tier"],
+                    )
+                else:
+                    skipped_unmanaged.append({
+                        "name": s["name"],
+                        "path": s["path"],
+                        "type": "skill",
+                        "reason": "Not present in central skills library",
+                    })
+
+    else:
+        # Targeted update
+        for req in expanded_requests:
+            req_norm = req.lower().strip().replace("_", "-")
+            handled = False
+
+            # Check plugins first
+            if req_norm in plugin_map:
+                plugin = plugin_map[req_norm]
+                canonical_name = plugin["name"]
+                src_dir = plugin["source_dir"]
+                p_tier = plugin["tier"]
+
+                if target_plugins_dir:
+                    dest_dir = os.path.join(target_plugins_dir, canonical_name)
+                    sync_item(src_dir, dest_dir, canonical_name, "plugin", plugin["package"], p_tier)
+                    handled = True
+                else:
+                    # Unpack inner skills for harnesses without dedicated plugin dir (e.g. Claude)
+                    pkg_key = plugin["package"].lower()
+                    matching_inner_skills = list(skill_by_pkg.get(pkg_key, []))
+                    inner_skills_dir = os.path.join(src_dir, "skills")
+                    if os.path.isdir(inner_skills_dir):
+                        for sub in sorted(os.listdir(inner_skills_dir)):
+                            sub_path = os.path.join(inner_skills_dir, sub)
+                            if os.path.isdir(sub_path) and os.path.exists(os.path.join(sub_path, "SKILL.md")):
+                                if not any(s.get("dir_name") == sub or s.get("name") == sub for s in matching_inner_skills):
+                                    matching_inner_skills.append({
+                                        "name": sub,
+                                        "package": plugin["package"],
+                                        "tier": plugin["tier"],
+                                        "source_dir": sub_path,
+                                    })
+                    if matching_inner_skills:
+                        for inner_s in matching_inner_skills:
+                            dest_dir = os.path.join(target_skills_dir, inner_s["name"])
+                            inner_tier = "core" if (p_tier == "core" or inner_s.get("tier") == "core") else inner_s.get("tier", "stack")
+                            sync_item(inner_s["source_dir"], dest_dir, inner_s["name"], "skill", inner_s["package"], inner_tier)
+                        handled = True
+                    elif os.path.exists(os.path.join(src_dir, "SKILL.md")):
+                        dest_dir = os.path.join(target_skills_dir, canonical_name)
+                        sync_item(src_dir, dest_dir, canonical_name, "skill", plugin["package"], p_tier)
+                        handled = True
+
+            # Check standalone skills
+            if not handled and req_norm in skill_map:
+                skill = skill_map[req_norm]
+                canonical_name = skill["name"]
+                dest_dir = os.path.join(target_skills_dir, canonical_name)
+                sync_item(skill["source_dir"], dest_dir, canonical_name, "skill", skill["package"], skill["tier"])
+                handled = True
+
+            # Check package names
+            if not handled and req_norm in skill_by_pkg:
+                for skill in skill_by_pkg[req_norm]:
+                    dest_dir = os.path.join(target_skills_dir, skill["name"])
+                    sync_item(skill["source_dir"], dest_dir, skill["name"], "skill", skill["package"], skill["tier"])
+                handled = True
+
+            if not handled:
+                not_found.append(req)
+
+    synced_docs = sync_project_docs(proj_dir, active_harness)
+
+    return {
+        "status": "success" if (updated or not not_found) else "error",
+        "project_path": proj_dir,
+        "harness": active_harness,
+        "library_path": catalog.get("library_path"),
+        "updated": updated,
+        "updated_count": len(updated),
+        "preserved_core": preserved_core,
+        "preserved_core_count": len(preserved_core),
+        "skipped_unmanaged": skipped_unmanaged,
+        "not_found": not_found,
+        "synced_docs": synced_docs,
+    }
+
+
+# ==============================================================================
 # Quartermaster Sweep (Project & Armory Audit with Pruning Governance)
 # ==============================================================================
 
@@ -2736,6 +3048,46 @@ def format_sweep_text(swp: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_update_text(res: Dict[str, Any]) -> str:
+    """Formats armory update results into a clear action report."""
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("  QUARTERMASTER ARMORY UPDATE REPORT")
+    lines.append(f"  Target Workspace: {res.get('project_path')}")
+    lines.append(f"  Skills Library:   {res.get('library_path')}")
+    lines.append(f"  Total Assets Updated: {res.get('updated_count', 0)}")
+    if res.get("preserved_core_count", 0) > 0:
+        lines.append(f"  Core Guardrails Preserved: {res.get('preserved_core_count')}")
+    lines.append("=" * 80)
+
+    updated = res.get("updated", [])
+    if updated:
+        lines.append("\n[Updated Capabilities]")
+        for u in updated:
+            t_badge = "[PLUGIN]" if u["type"] == "plugin" else "[SKILL] "
+            core_badge = " [.core preserved]" if u.get("has_core") else ""
+            lines.append(
+                f"  * {t_badge} {u['name']:<30} ({u.get('files_copied', 0)} files){core_badge} -> {u['destination']}"
+            )
+
+    skipped = res.get("skipped_unmanaged", [])
+    if skipped:
+        lines.append("\n[Unmanaged Local Capabilities (Skipped)]")
+        for s in skipped:
+            lines.append(f"  - {s['name']:<32} (Custom project tool, not in central armory)")
+
+    not_found = res.get("not_found", [])
+    if not_found:
+        lines.append("\n[Unmatched Requisitions]")
+        for nf in not_found:
+            lines.append(f"  ! [NOT FOUND] {nf}")
+
+    lines.append("\n" + "=" * 80)
+    lines.append("Status: Update complete. Capabilities refreshed from central armory.")
+    lines.append("=" * 80)
+    return "\n".join(lines)
+
+
 def format_import_text(res: Dict[str, Any]) -> str:
     """Formats git import result."""
     lines: List[str] = []
@@ -2905,6 +3257,14 @@ def main() -> int:
         help="Audit current workspace tech, review installed skills, and cross-reference library for additions/pruning.",
     )
     parser.add_argument(
+        "--update",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="NAMES",
+        help="Update installed workspace capabilities from skills-library. Omit NAMES to update all, or pass comma-separated names.",
+    )
+    parser.add_argument(
         "--auto-prune",
         action="store_true",
         help="In sweep mode, automatically remove unneeded skills from .agents/.",
@@ -3015,23 +3375,41 @@ def main() -> int:
         help="Override skills-library directory path for this execution.",
     )
 
-    # Defensive filter: clean extraneous 'sweep' positional arguments
+    # Defensive filter: clean extraneous 'sweep' and 'update' positional arguments
     raw_args = sys.argv[1:]
     filtered_args = []
     seen_sweep = False
-    for a in raw_args:
+    seen_update = False
+    i = 0
+    while i < len(raw_args):
+        a = raw_args[i]
         if a == "--sweep":
             seen_sweep = True
             filtered_args.append(a)
         elif a == "sweep" and (seen_sweep or (filtered_args and filtered_args[-1] == "--sweep")):
             # Redundant literal 'sweep' argument
-            continue
-        elif a == "sweep" and not filtered_args:
-            # Invoked as `quartermaster.py sweep` -> convert to `--sweep .`
+            pass
+        elif a == "sweep" and not seen_sweep:
             filtered_args.extend(["--sweep", "."])
             seen_sweep = True
+        elif a == "--update":
+            seen_update = True
+            filtered_args.append(a)
+            if i + 1 < len(raw_args) and not raw_args[i + 1].startswith("-"):
+                filtered_args.append(raw_args[i + 1])
+                i += 1
+        elif a == "update" and (seen_update or (filtered_args and filtered_args[-1] == "--update")):
+            # Redundant literal 'update' argument
+            pass
+        elif a == "update" and not seen_update:
+            filtered_args.append("--update")
+            seen_update = True
+            if i + 1 < len(raw_args) and not raw_args[i + 1].startswith("-"):
+                filtered_args.append(raw_args[i + 1])
+                i += 1
         else:
             filtered_args.append(a)
+        i += 1
 
     args = parser.parse_args(filtered_args)
 
@@ -3132,6 +3510,7 @@ def main() -> int:
         and args.scan is None
         and not args.provision
         and args.sweep is None
+        and args.update is None
         and not args.core_list
     ):
         parser.print_help()
@@ -3153,6 +3532,21 @@ def main() -> int:
             else:
                 print(format_scan_text(scan_res))
             return 0
+
+        if args.update is not None:
+            names = [n.strip() for n in args.update.split(",") if n.strip()] if args.update else None
+            proj_arg = args.project if args.project else (find_project_root() or os.getcwd())
+            res = update_project_assets(
+                project_path=proj_arg,
+                asset_names=names,
+                library_path=args.library,
+                harness=args.harness,
+            )
+            if args.json:
+                print(json.dumps(res, indent=2))
+            else:
+                print(format_update_text(res))
+            return 0 if res.get("status") in ("success", "partial") else 1
 
         if args.sweep is not None:
             if args.check_only:

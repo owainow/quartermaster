@@ -31,6 +31,7 @@ Quartermaster is designed to be driven directly from agent chat:
 | :--- | :--- | :--- |
 | **`/quartermaster`** | All | Scans project manifests, guides scoping, and provisions capabilities into your repo |
 | **`/quartermaster sweep`** | All | Audits installed tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
+| **`/quartermaster update`** | All | Syncs workspace skills and plugins with central armory while strictly preserving `.core` |
 | **`/quartermaster import <git-url>`** | All | Clones a git repo or extracts a deep skill link into the central armory and active project |
 | **`/quartermaster core [add\|remove\|list]`** | All | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
 | **`/quartermaster catalog`** | All | Browses all available capabilities in your central library armory |
@@ -130,6 +131,13 @@ Codebases evolve. Running a sweep audits your repository capabilities against ac
   - `pruning-mode` (default: `aggressive`): Toggles between `aggressive` and `soft`.
   - `suggest-pruning` (default: `true`): Reports removal recommendations.
   - `auto-prune` (default: `false`): Automatically deletes unneeded non-core tools during sweeps.
+
+### Native Armory Update Engine (`/quartermaster update`)
+Syncs installed standalone skills (`.agents/skills/` or `.claude/skills/`) and full plugins (`.agents/plugins/`) directly from your central armory into the active repository:
+- **Strict `.core` Marker Preservation**: Existing `.core` marker files in your workspace are never lost or overwritten, ensuring permanent guardrails remain intact. If upstream is marked Core, the workspace tool also adopts Core protection.
+- **Targeted or Full Armory Sync**: Update all installed capabilities (`/quartermaster update` or `--update`) or target specific capabilities (`/quartermaster update <name1,name2>` or `--update <name1,name2>`).
+- **Unmanaged Local Tools Safety**: Custom project tools created directly in your repository that do not exist in the central armory are safely left untouched.
+- **Context Docs Synchronization**: Automatically updates active capability tables in `CLAUDE.md` and `AGENTS.md`.
 
 ---
 

@@ -9,7 +9,7 @@ This repository uses Quartermaster to manage project-scoped capabilities in `.ag
 | :--- | :--- | :--- | :--- |
 | *(None)* | - | - | Run `/quartermaster` to equip capabilities |
 
-Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster catalog`
+Commands: `/quartermaster`, `/quartermaster sweep`, `/quartermaster update`, `/quartermaster catalog`
 <!-- QUARTERMASTER_END -->
 
 ---

@@ -3,7 +3,7 @@ name: quartermaster
 description: Intelligent project onboarding, skill and plugin armory, and automated sweep engine. Use when the user asks to "run quartermaster", "provision skills", "audit project tools", "sweep skills", "import skill from git", "catalog skills", "configure armory", or mentions managing project capabilities.
 version: 1.2.0
 user-invocable: true
-argument-hint: "[sweep | import <url> | core <add|remove|list> | catalog | config | schedule]"
+argument-hint: "[sweep | update [names] | import <url> | core <add|remove|list> | catalog | config | schedule]"
 allowed-tools:
   - Bash
   - Read
@@ -34,16 +34,18 @@ Parse `$ARGUMENTS` to determine the requested action:
    Execute Command 1 (Initial Project Onboarding).
 2. **Starts with "sweep"**:
    Execute Command 2 (Workspace Sweep).
-3. **Starts with "import"**:
-   Execute Command 3 (In-Flow Git Import).
-4. **Starts with "core"**:
-   Execute Command 4 (Core Capability Governance).
-5. **Starts with "catalog"**:
-   Execute Command 5 (Browse Central Catalog).
-6. **Starts with "config"**:
-   Execute Command 6 (Settings & Configuration).
-7. **Starts with "schedule"**:
-   Execute Command 7 (Schedule Daily Sweep).
+3. **Starts with "update"**:
+   Execute Command 3 (Armory Capability Update).
+4. **Starts with "import"**:
+   Execute Command 4 (In-Flow Git Import).
+5. **Starts with "core"**:
+   Execute Command 5 (Core Capability Governance).
+6. **Starts with "catalog"**:
+   Execute Command 6 (Browse Central Catalog).
+7. **Starts with "config"**:
+   Execute Command 7 (Settings & Configuration).
+8. **Starts with "schedule"**:
+   Execute Command 8 (Schedule Daily Sweep).
 
 ### Engine Script Resolution:
 Always resolve the Quartermaster script via:
@@ -136,7 +138,33 @@ Sweep Actions:
 
 ---
 
-## Command 3: In-Flow Git Import (`/quartermaster import <git-url>`)
+## Command 3: Armory Capability Update (`/quartermaster update`)
+
+<workflow>
+When skills or plugins in your central armory have been upgraded or modified, synchronize your workspace:
+```bash
+QM_SCRIPT="${HOME}/.claude/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${CLAUDE_PLUGIN_ROOT}/../scripts/quartermaster.py"
+
+# Update all installed capabilities in the project
+python3 "$QM_SCRIPT" --update --project . --harness claude
+
+# Or update targeted capabilities
+python3 "$QM_SCRIPT" --update <name1,name2> --project . --harness claude
+```
+
+Key Behaviors:
+1. **Synchronize Installed Capabilities**: Updates `.claude/skills/<name>/` and `.agents/skills/<name>/` directly from the central armory (`~/.claude/skills-library/` or `~/.gemini/skills-library/`).
+2. **Strict `.core` Marker Preservation**: If a workspace tool contains a `.core` marker file, Quartermaster strictly preserves that marker so permanent workflow guardrails are never lost. If the central library version is marked as Core, the workspace tool also adopts Core protection.
+3. **Targeted or Workspace-Wide**: Run without names to update all installed tools, or pass comma-separated names to target specific capabilities.
+4. **Unmanaged Local Tools Safety**: Custom project tools created directly in your repository that do not exist in the central armory are safely preserved and skipped without risk of deletion or overwrite.
+5. **Project Context Sync**: Automatically updates `<project>/CLAUDE.md` active capabilities summary table.
+</workflow>
+
+---
+
+## Command 4: In-Flow Git Import (`/quartermaster import <git-url>`)
 
 <workflow>
 When the user pastes a repository URL or a direct link to a specific skill:
@@ -157,7 +185,7 @@ Quartermaster performs dual action:
 
 ---
 
-## Command 4: Core Capability Governance (`/quartermaster core [add|remove|list]`)
+## Command 5: Core Capability Governance (`/quartermaster core [add|remove|list]`)
 
 <workflow>
 Deterministic `.core` marker files inside capability folders (`.claude/skills/<name>/.core`) shield permanent guardrails from pruning.
@@ -183,7 +211,7 @@ python3 "$QM_SCRIPT" --core-rm <name> --project .
 
 ---
 
-## Command 5: Browse Catalog (`/quartermaster catalog`)
+## Command 6: Browse Catalog (`/quartermaster catalog`)
 
 <workflow>
 Display all available armory capabilities:
@@ -197,7 +225,7 @@ python3 "$QM_SCRIPT" --catalog
 
 ---
 
-## Command 6: Settings & Config (`/quartermaster config`)
+## Command 7: Settings & Config (`/quartermaster config`)
 
 <workflow>
 Inspect or update Quartermaster settings:
@@ -219,7 +247,7 @@ python3 "$QM_SCRIPT" --config-set <key> <value>
 
 ---
 
-## Command 7: Schedule Daily Sweep (`/quartermaster schedule`)
+## Command 8: Schedule Daily Sweep (`/quartermaster schedule`)
 
 <workflow>
 In Claude Code, background daily sweep checks run automatically on `SessionStart` when loaded as a plugin (`claude --plugin-dir`).

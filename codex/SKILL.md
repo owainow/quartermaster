@@ -58,7 +58,26 @@ Supported flags:
 - `--no-auto-add`: Output recommendations only without auto-equipping.
 - `--no-prune`: Suppress pruning recommendations and guarantee zero deletions.
 
-### 3. In-Flow Git Import
+### 3. Armory Capability Update
+Synchronize installed workspace capabilities with upgrades and edits in the central armory:
+```bash
+QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
+[ -f "$QM_SCRIPT" ] || QM_SCRIPT="${HOME}/.codex/skills/quartermaster/scripts/quartermaster.py"
+
+# Update all installed tools in the project
+python3 "$QM_SCRIPT" --update --project . --harness codex
+
+# Or update targeted capabilities
+python3 "$QM_SCRIPT" --update <name1,name2> --project . --harness codex
+```
+
+Behaviors:
+- Syncs `.agents/skills/<name>/` and `.agents/plugins/<name>/` directly from the central library.
+- Strictly preserves existing `.core` marker files so permanent guardrails are never lost.
+- Safely skips custom unmanaged local tools created directly in the workspace.
+- Synchronizes `<project>/AGENTS.md` active capabilities summary.
+
+### 4. In-Flow Git Import
 Import an external repository or extract a specific skill into the armory and active workspace:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"
@@ -67,7 +86,7 @@ python3 "$QM_SCRIPT" --import <git_url> --project . --harness codex
 ```
 Append `--core` to mark the capability as a protected permanent guardrail.
 
-### 4. Core Capability Governance
+### 5. Core Capability Governance
 Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/.core`) shield permanent guardrails from sweep pruning.
 
 - List Core capabilities:
@@ -89,7 +108,7 @@ Deterministic `.core` marker files inside skill folders (`.agents/skills/<name>/
   python3 "$QM_SCRIPT" --core-rm <name> --project .
   ```
 
-### 5. Catalog Inspection
+### 6. Catalog Inspection
 List all available skills and plugins in the central armory:
 ```bash
 QM_SCRIPT="${HOME}/.agents/skills/quartermaster/scripts/quartermaster.py"

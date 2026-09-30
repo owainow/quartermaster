@@ -22,6 +22,7 @@ Codex CLI allows both natural language triggering and slash commands:
 | :--- | :--- |
 | **`/quartermaster`** | Scans current project manifests, guides scoping, and provisions capabilities into `.agents/skills/` |
 | **`/quartermaster sweep`** | Audits installed capabilities against codebase manifests, auto-equips new matches, and suggests pruning |
+| **`/quartermaster update`** | Synchronizes installed capabilities from your central armory while preserving `.core` guardrails |
 | **`/quartermaster import <git-url>`** | Imports an external repository or skill into the armory and active project |
 | **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files shielding permanent guardrails from pruning |
 | **`/quartermaster catalog`** | Lists all capabilities available across the central armory |

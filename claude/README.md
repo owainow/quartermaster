@@ -22,6 +22,7 @@ Quartermaster operates as both an autonomous agent capability and a direct slash
 | :--- | :--- |
 | **`/quartermaster`** | Scans current project manifests, guides scoping, and provisions capabilities into `.claude/skills/` |
 | **`/quartermaster sweep`** | Audits installed capabilities against project manifests, auto-equips new matches, and suggests pruning |
+| **`/quartermaster update`** | Synchronizes installed capabilities from your central armory while preserving `.core` guardrails |
 | **`/quartermaster import <git-url>`** | Imports a git repository or extracts a specific skill into the armory and equips it |
 | **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files shielding permanent guardrails from pruning |
 | **`/quartermaster catalog`** | Lists all capabilities available across the central armory |

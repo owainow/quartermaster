@@ -30,6 +30,7 @@ Quartermaster is operated directly from your Antigravity chat:
 | :--- | :--- |
 | **`/quartermaster`** | Scans current workspace, guides project scoping, and provisions capabilities into `.agents/` |
 | **`/quartermaster sweep`** | Audits active tools against codebase manifests, auto-equips new matches, and flags unneeded tools |
+| **`/quartermaster update`** | Synchronizes installed skills and plugins from your central library while preserving `.core` guardrails |
 | **`/quartermaster import <git-url>`** | Clones a git repo or extracts a deep skill link into your central library and active project |
 | **`/quartermaster core [add\|remove\|list]`** | Manages deterministic `.core` marker files protecting permanent guardrails from pruning |
 | **`/quartermaster catalog`** | Lists all available skills and plugins across your armory |
