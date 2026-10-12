@@ -20,7 +20,6 @@ Zero external dependencies beyond Python 3 standard library.
 """
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -83,6 +82,39 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 SUPPORTED_HARNESSES = ("agy", "claude", "codex", "universal")
+
+# Hidden directories that commonly hold skills (e.g. <repo>/.agents/skills/<name>/SKILL.md).
+# All other dot-directories (.git, .venv, ...) are still skipped during discovery.
+SCANNED_HIDDEN_DIRS: Set[str] = {".agents"}
+SKIPPED_SCAN_DIRS: Set[str] = {"node_modules", "__pycache__"}
+
+
+def find_skill_files(root_dir: str) -> List[str]:
+    """
+    Recursively finds SKILL.md files under root_dir.
+
+    Unlike glob("**/SKILL.md", recursive=True), this descends into whitelisted hidden
+    directories such as `.agents`, while still skipping other dot-directories and
+    heavyweight dependency folders.
+    """
+    found: List[str] = []
+    if not root_dir or not os.path.isdir(root_dir):
+        return found
+    visited: Set[str] = set()
+    for current, dirs, files in os.walk(root_dir, followlinks=True):
+        real = os.path.realpath(current)
+        if real in visited:
+            dirs[:] = []
+            continue
+        visited.add(real)
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in SKIPPED_SCAN_DIRS
+            and (not d.startswith(".") or d in SCANNED_HIDDEN_DIRS)
+        )
+        if "SKILL.md" in files:
+            found.append(os.path.join(current, "SKILL.md"))
+    return sorted(found)
 
 # ==============================================================================
 # Deterministic Core Capability Governance (.core marker file)
@@ -775,7 +807,7 @@ def import_library_asset(
                             candidate_dirs.append(root)
 
             if not candidate_dirs:
-                all_s = glob.glob(os.path.join(tmp_dir, "**", "SKILL.md"), recursive=True)
+                all_s = find_skill_files(tmp_dir)
                 available = [os.path.basename(os.path.dirname(p)) for p in all_s]
                 avail_str = f" Available skills: {', '.join(available[:10])}" if available else ""
                 return {
@@ -918,7 +950,7 @@ def import_library_asset(
             }
 
     is_plugin = os.path.exists(os.path.join(dest_dir, "plugin.json"))
-    skill_files = glob.glob(os.path.join(dest_dir, "**", "SKILL.md"), recursive=True)
+    skill_files = find_skill_files(dest_dir)
 
     is_core_asset = is_core
     if is_core_asset:
@@ -1093,7 +1125,7 @@ def get_catalog(library_path: Optional[str] = None, harness: Optional[str] = Non
             }
             all_plugins.append(plugin_info)
 
-        skill_files = glob.glob(os.path.join(pkg_dir, "**", "SKILL.md"), recursive=True)
+        skill_files = find_skill_files(pkg_dir)
         pkg_skills: List[Dict[str, Any]] = []
 
         for sf in sorted(skill_files):

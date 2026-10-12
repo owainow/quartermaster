@@ -88,3 +88,34 @@ class TestCatalog:
 
         preflight_plugin = next(p for p in catalog["plugins"] if p["name"] == "preflight")
         assert preflight_plugin["tier"] == "core"
+
+    def test_get_catalog_discovers_skills_in_hidden_agents_dir(self, tmp_path):
+        lib = tmp_path / "lib"
+        pkg = lib / "some-repo"
+
+        hidden_skill = pkg / ".agents" / "skills" / "hidden-skill"
+        hidden_skill.mkdir(parents=True)
+        (hidden_skill / "SKILL.md").write_text(
+            "---\nname: hidden-skill\ndescription: Lives under .agents\n---\n"
+        )
+
+        # Other dot-directories must still be ignored.
+        git_skill = pkg / ".git" / "skills" / "git-skill"
+        git_skill.mkdir(parents=True)
+        (git_skill / "SKILL.md").write_text("---\nname: git-skill\ndescription: x\n---\n")
+
+        catalog = quartermaster.get_catalog(str(lib))
+        skill_names = [s["name"] for s in catalog["skills"]]
+        assert "hidden-skill" in skill_names
+        assert "git-skill" not in skill_names
+
+    def test_find_skill_files_missing_dir_and_symlink_loop(self, tmp_path):
+        assert quartermaster.find_skill_files(str(tmp_path / "nope")) == []
+
+        skill = tmp_path / "pkg" / "s1"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: s1\n---\n")
+        (skill / "loop").symlink_to(tmp_path / "pkg", target_is_directory=True)
+
+        found = quartermaster.find_skill_files(str(tmp_path / "pkg"))
+        assert found == [str(skill / "SKILL.md")]
