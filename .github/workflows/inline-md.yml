@@ -1,10 +1,17 @@
-# inline.md creator workflow v1: review sponsorship PRs before merging.
+# inline.md creator workflow v2: daily health checks and exact-task proposals.
 # Enable GitHub Actions to create pull requests in repository settings.
 name: inline.md sponsorship proposals
+run-name: inline-md:${{ inputs.task_id || 'health' }}
 on:
   workflow_dispatch:
+    inputs:
+      task_id:
+        description: 'Inline.md task UUID; leave empty for initial verification'
+        required: false
+        default: ''
+        type: string
   schedule:
-    - cron: '9-59/10 * * * *'
+    - cron: '49 3 * * *'
 permissions: {}
 concurrency:
   group: inline-md-2b415baa-a199-4268-a59d-430392904054
@@ -23,6 +30,8 @@ jobs:
         env:
           INLINE_MD_ENROLLMENT_ID: "2b415baa-a199-4268-a59d-430392904054"
           INLINE_MD_ORIGIN: "https://app.inlinemd.dev"
+          INLINE_MD_PROTOCOL: v2
+          INLINE_MD_TASK_ID: ${{ inputs.task_id }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'INLINE_MD_RUNNER_PY'
@@ -212,7 +221,11 @@ jobs:
           def validate_grant(value):
               grant = object_value(value)
               extra = {"pr_number", "head_sha"} if grant.get("kind") in {"close", "retire"} else set()
-              if set(grant) != COMMON_FIELDS | extra or type(grant.get("version")) is not int or grant["version"] != 1:
+              if grant.get("version") == 2 and grant.get("kind") == "publish":
+                  extra |= {"auto_merge"}
+                  if type(grant.get("auto_merge")) is not bool:
+                      raise RunnerFailure("invalid_grant")
+              if set(grant) != COMMON_FIELDS | extra or type(grant.get("version")) is not int or grant["version"] not in {1, 2}:
                   raise RunnerFailure("invalid_grant")
               for field in ("claim_id", "operation_id", "booking_id"):
                   try:
@@ -244,7 +257,7 @@ jobs:
               desired = decode_bytes(grant["desired_base64"], grant["desired_sha256"])
               if git_blob_sha(original) != grant["base_blob_sha"] or desired == original:
                   raise RunnerFailure("invalid_grant")
-              if extra:
+              if grant["kind"] in {"close", "retire"}:
                   number = grant["pr_number"]
                   if not isinstance(grant["head_sha"], str) or not SHA.fullmatch(grant["head_sha"]):
                       raise RunnerFailure("invalid_grant")
@@ -411,7 +424,25 @@ jobs:
                       if not positive(number):
                           raise RunnerFailure("mutation_response_mismatch", uncertain=True)
                       self.verify_pr(number, head, state="open")
-                  return {"outcome": "proposed", "head_sha": head, "pr_number": number}
+                  report = {"outcome": "proposed", "head_sha": head, "pr_number": number}
+                  if self.grant["version"] == 2:
+                      report["merge_status"] = "not_requested"
+                      if self.grant["auto_merge"]:
+                          # One immediate, exact-head merge. Never arm future native
+                          # auto-merge, approve our own PR or bypass branch protection.
+                          try:
+                              self.verify_pr(number, head, state="open")
+                              if self.reference(self.grant["head_branch"]) != head:
+                                  raise RunnerFailure("head_changed")
+                              response = self.api("PUT", f"/pulls/{number}/merge", payload={"sha": head, "merge_method": "merge"})
+                              value = object_value(response.value)
+                              if value.get("merged") is not True or not isinstance(value.get("sha"), str) or not SHA.fullmatch(value["sha"]):
+                                  raise RunnerFailure("merge_response_mismatch", uncertain=True)
+                              report["merge_status"] = "merged"
+                          except RunnerFailure as error:
+                              report["merge_status"] = "uncertain" if error.uncertain else "blocked"
+                              report["merge_error_code"] = error.code
+                  return report
           
               def cleanup(self, original, desired):
                   number, head = self.grant["pr_number"], self.grant["head_sha"]
@@ -495,7 +526,18 @@ jobs:
               try:
                   origin = origin_value(environment.get("INLINE_MD_ORIGIN"))
                   enrollment = str(UUID(environment.get("INLINE_MD_ENROLLMENT_ID", "")))
-                  claim = platform_post(transport, environment, origin, "claim", {"enrollment_id": enrollment})
+                  protocol = environment.get("INLINE_MD_PROTOCOL", "v1")
+                  task = environment.get("INLINE_MD_TASK_ID", "")
+                  if protocol == "v2":
+                      if task:
+                          task = str(UUID(task))
+                      endpoint = "v2/claim" if task else "v2/setup"
+                      payload = {"enrollment_id": enrollment, "task_id": task} if task else {"enrollment_id": enrollment}
+                  elif protocol == "v1" and not task:
+                      endpoint, payload = "claim", {"enrollment_id": enrollment}
+                  else:
+                      raise RunnerFailure("invalid_environment")
+                  claim = platform_post(transport, environment, origin, endpoint, payload)
                   if set(claim) != {"work"}:
                       raise RunnerFailure("invalid_response")
                   if claim["work"] is None:
